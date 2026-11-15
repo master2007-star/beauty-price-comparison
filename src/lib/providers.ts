@@ -20,6 +20,13 @@ import type { ProviderId, RawOffer } from "./types";
 
 const FETCH_TIMEOUT_MS = 20_000;
 
+// SearchApi is the only provider whose results carry product_token values,
+// and the SearchApi token route is the only proven direct-link route. When
+// SearchApi is slow, a single timeout loses every token for the search, so
+// fetchSearchApi alone gets one retry (see below). The delay keeps the
+// retry from hammering a struggling endpoint.
+const SEARCHAPI_RETRY_DELAY_MS = 1_000;
+
 type Json = Record<string, unknown>;
 
 function asRecord(v: unknown): Json | null {
@@ -38,29 +45,52 @@ function asNumber(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-async function fetchJson(url: string, init: RequestInit, provider: ProviderId): Promise<Json> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`);
+async function fetchJson(
+  url: string,
+  init: RequestInit,
+  provider: ProviderId,
+  retries = 0,
+): Promise<Json> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, SEARCHAPI_RETRY_DELAY_MS));
     }
-    const parsed: unknown = JSON.parse(text);
-    const obj = asRecord(parsed);
-    if (!obj) throw new Error("Unexpected response shape (not a JSON object)");
-    const err = asString(obj.error) ?? asString(asRecord(obj.error)?.message);
-    if (err) throw new Error(err);
-    return obj;
-  } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`Timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal });
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`);
+      }
+      const parsed: unknown = JSON.parse(text);
+      const obj = asRecord(parsed);
+      if (!obj) throw new Error("Unexpected response shape (not a JSON object)");
+      const err = asString(obj.error) ?? asString(asRecord(obj.error)?.message);
+      if (err) throw new Error(err);
+      return obj;
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      // Only failures where the provider never answered are retryable:
+      // timeouts (the abort) and network-level fetch failures. Every other
+      // failure means the provider answered — HTTP error statuses
+      // (429/4xx/5xx), malformed payloads, and API error fields — and must
+      // surface immediately, never silently re-spend a call.
+      const retryable = error.name === "AbortError" || error instanceof TypeError;
+      if (retryable && attempt < retries) {
+        continue;
+      }
+      if (error.name === "AbortError") {
+        throw new Error(`Timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    throw e instanceof Error ? e : new Error(String(e));
-  } finally {
-    clearTimeout(timer);
   }
+  // Unreachable: every iteration returns, throws, or continues to a final
+  // attempt that returns or throws.
+  throw new Error("Unreachable fetchJson exit");
 }
 
 /** Pull a Google catalog id out of a product URL when Google embedded one. */
@@ -161,7 +191,10 @@ export async function fetchSearchApi(query: string, cfg: AppConfig): Promise<Raw
     num: "40",
     api_key: key,
   });
-  const json = await fetchJson(`https://www.searchapi.io/api/v1/search?${params}`, {}, "searchapi");
+  // One retry on timeout/network failure only: SearchApi slowness loses
+  // every product_token for the search, and tokens are the only proven
+  // direct-link route. HTTP errors never retry (see fetchJson).
+  const json = await fetchJson(`https://www.searchapi.io/api/v1/search?${params}`, {}, "searchapi", 1);
   const fallback = defaultCurrencyForRegion(cfg.region);
   const offers: RawOffer[] = [];
 
