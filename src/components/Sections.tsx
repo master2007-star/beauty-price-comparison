@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useInView, useReducedMotion } from "framer-motion";
 import { PHOTOS } from "./photos";
+import { useMagnetic, useTilt } from "./pointer-motion";
 import RollLabel from "./RollLabel";
 
 /**
@@ -84,37 +85,62 @@ export function CategoryBento({ onSearch }: { onSearch: (query: string) => void 
         />
         <div className="bento">
           {TILES.map((tile, i) => (
-            <motion.button
-              key={tile.title}
-              type="button"
-              className={`bento-tile bento-${tile.kind}${tile.wide ? " bento-wide" : ""}`}
-              custom={i}
-              variants={rise}
-              initial="hidden"
-              whileInView="show"
-              whileHover={{ y: -4 }}
-              whileTap={{ scale: 0.99 }}
-              viewport={{ once: true, margin: "-40px" }}
-              onClick={() => onSearch(tile.query)}
-            >
-              {tile.photo ? (
-                <>
-                  <img className="bento-photo" src={tile.photo} alt="" loading="lazy" decoding="async" />
-                  <span className="bento-shade" aria-hidden="true" />
-                </>
-              ) : null}
-              <span className="bento-text">
-                <span className="bento-title">{tile.title}</span>
-                <span className="bento-sub">{tile.sub}</span>
-              </span>
-              <span className="bento-arrow" aria-hidden="true">
-                →
-              </span>
-            </motion.button>
+            <BentoTile key={tile.title} tile={tile} index={i} onSearch={onSearch} />
           ))}
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * One bento tile. 3D tilt (rotateX/rotateY motion values + perspective)
+ * lives in the same style object as the entrance variants and the
+ * whileHover lift, so framer composes one transform — the tilt never
+ * fights the rise or the lift. The photo zoom is CSS on the inner <img>,
+ * a different element. Tilt is fine-pointer only and off under
+ * prefers-reduced-motion (see useTilt); at rest the springs sit at 0.
+ */
+function BentoTile({
+  tile,
+  index,
+  onSearch,
+}: {
+  tile: (typeof TILES)[number];
+  index: number;
+  onSearch: (query: string) => void;
+}) {
+  const tilt = useTilt();
+  return (
+    <motion.button
+      type="button"
+      className={`bento-tile bento-${tile.kind}${tile.wide ? " bento-wide" : ""}`}
+      custom={index}
+      variants={rise}
+      initial="hidden"
+      whileInView="show"
+      whileHover={{ y: -4 }}
+      whileTap={{ scale: 0.99 }}
+      viewport={{ once: true, margin: "-40px" }}
+      style={{ rotateX: tilt.rotateX, rotateY: tilt.rotateY, transformPerspective: 900 }}
+      onMouseMove={tilt.onMouseMove}
+      onMouseLeave={tilt.onMouseLeave}
+      onClick={() => onSearch(tile.query)}
+    >
+      {tile.photo ? (
+        <>
+          <img className="bento-photo" src={tile.photo} alt="" loading="lazy" decoding="async" />
+          <span className="bento-shade" aria-hidden="true" />
+        </>
+      ) : null}
+      <span className="bento-text">
+        <span className="bento-title">{tile.title}</span>
+        <span className="bento-sub">{tile.sub}</span>
+      </span>
+      <span className="bento-arrow" aria-hidden="true">
+        →
+      </span>
+    </motion.button>
   );
 }
 
@@ -329,12 +355,17 @@ export function RepeatFavourites({ onSearch }: { onSearch: (query: string) => vo
           whileInView="show"
           viewport={{ once: true, margin: "-40px" }}
         >
-          <img
-            src={PHOTOS.favourites}
-            alt="Amber skincare bottles arranged with stone blocks"
-            loading="lazy"
-            decoding="async"
-          />
+          {/* Clipping frame for the hover zoom: the scaled img must not
+              paint over the caption. Block div, same box as the img, so
+              the resting layout is unchanged. */}
+          <div className="fav-photo-frame">
+            <img
+              src={PHOTOS.favourites}
+              alt="Amber skincare bottles arranged with stone blocks"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
           <figcaption>
             SKINCARE · MAKEUP · HAIR · FRAGRANCE — IF A STORE SELLS IT THROUGH GOOGLE SHOPPING, IT CAN BE COMPARED
             HERE.
@@ -382,26 +413,40 @@ export function WhyCards() {
         />
         <div className="why-grid">
           {WHY.map((card, i) => (
-            <motion.article
-              key={card.title}
-              className="why-card"
-              custom={i}
-              variants={rise}
-              initial="hidden"
-              whileInView="show"
-              whileHover={{ y: -4 }}
-              viewport={{ once: true, margin: "-40px" }}
-            >
-              <div className="why-icon" aria-hidden="true">
-                {card.icon}
-              </div>
-              <h3>{card.title}</h3>
-              <p>{card.body}</p>
-            </motion.article>
+            <WhyCard key={card.title} card={card} index={i} />
           ))}
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * One why-card. Same tilt setup as BentoTile: rotateX/rotateY motion
+ * values in the style object compose with the entrance variants and the
+ * whileHover lift in framer's single transform pipeline.
+ */
+function WhyCard({ card, index }: { card: (typeof WHY)[number]; index: number }) {
+  const tilt = useTilt();
+  return (
+    <motion.article
+      className="why-card"
+      custom={index}
+      variants={rise}
+      initial="hidden"
+      whileInView="show"
+      whileHover={{ y: -4 }}
+      viewport={{ once: true, margin: "-40px" }}
+      style={{ rotateX: tilt.rotateX, rotateY: tilt.rotateY, transformPerspective: 900 }}
+      onMouseMove={tilt.onMouseMove}
+      onMouseLeave={tilt.onMouseLeave}
+    >
+      <div className="why-icon" aria-hidden="true">
+        {card.icon}
+      </div>
+      <h3>{card.title}</h3>
+      <p>{card.body}</p>
+    </motion.article>
   );
 }
 
@@ -489,6 +534,10 @@ export function Faq() {
 /* ------------------------------ closing CTA ------------------------------ */
 
 export function ClosingCta({ onStart }: { onStart: () => void }) {
+  // Magnetic pull toward the cursor (fine pointer only, no reduced
+  // motion). Transform on the button; the roll-label animates the inner
+  // label — different elements, no conflict.
+  const magnetic = useMagnetic();
   return (
     <section className="section" aria-label="Get started">
       <div className="wrap">
@@ -506,9 +555,17 @@ export function ClosingCta({ onStart }: { onStart: () => void }) {
             price you see.
           </h2>
           <p>Name the product. See every store that sells it. Buy it once, at the right price.</p>
-          <button type="button" className="cta-btn roll-btn" onClick={onStart}>
+          <motion.button
+            ref={magnetic.ref}
+            type="button"
+            className="cta-btn roll-btn magnetic-btn"
+            style={magnetic.style}
+            onMouseMove={magnetic.onMouseMove}
+            onMouseLeave={magnetic.onMouseLeave}
+            onClick={onStart}
+          >
             <RollLabel text="Compare a product now ↑" />
-          </button>
+          </motion.button>
         </motion.div>
       </div>
     </section>

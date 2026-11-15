@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
+import { useEffect, useRef, type ReactNode } from "react";
+import { animate, motion, useMotionValue, useReducedMotion, useScroll, useTransform } from "framer-motion";
 import { PHOTOS } from "./photos";
 import SearchForm from "./SearchForm";
 
@@ -24,6 +24,37 @@ const QUICK: Array<{ label: string; query: string }> = [
 ];
 
 /**
+ * Gentle infinite float for the hero glass pills/cards. A wrapper element
+ * on purpose: the float (outer) composes with the mount slide-in (inner)
+ * through nesting, so neither animation writes the other's transform.
+ * Under prefers-reduced-motion it renders a plain div — no motion at all.
+ * At rest (and before the first float cycle) y is 0, so the layout is
+ * identical to the un-wrapped render.
+ */
+function Float({
+  children,
+  delay = 0,
+  duration = 6,
+}: {
+  children: ReactNode;
+  delay?: number;
+  duration?: number;
+}) {
+  const reduceMotion = useReducedMotion();
+  if (reduceMotion) {
+    return <div>{children}</div>;
+  }
+  return (
+    <motion.div
+      animate={{ y: [0, -4, 0] }}
+      transition={{ duration, repeat: Infinity, ease: "easeInOut", delay }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/**
  * Full-width photo hero, 760px, matching the artifact: glass pills on top,
  * huge white serif headline bottom-left, two glass cards on the right, and
  * the search bar straddling the bottom edge. All motion is transform-only:
@@ -33,13 +64,36 @@ const QUICK: Array<{ label: string; query: string }> = [
  * overflow-masked: a masked rise (words starting below the mask) leaves the
  * headline clipped mid-line in the server HTML and until hydration +
  * animation finish, so the words rise from a small offset instead and are
- * fully visible from first paint.
+ * fully visible from first paint. The photo also drifts on a slow Ken
+ * Burns scale (a motion value, so it composes with the parallax y on the
+ * same element), the glass pills/cards float gently (wrapper elements, so
+ * the float never fights the mount slide-in), and the glass cards get a
+ * shine sweep on hover (a decorative band parked out of view at rest).
  */
 export default function Hero({ loading, onSearch }: HeroProps) {
   const ref = useRef<HTMLDivElement>(null);
   const reduceMotion = useReducedMotion();
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
   const photoY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 70]);
+
+  // Slow Ken Burns drift: scale 1.15 → 1.22 over 20s, mirroring forever.
+  // A motion value in the same style object as the parallax y, so framer
+  // composes both into one transform. Under reduced motion it stays at
+  // the resting 1.15, exactly as before.
+  const kbScale = useMotionValue(1.15);
+  useEffect(() => {
+    if (reduceMotion) {
+      kbScale.set(1.15);
+      return;
+    }
+    const controls = animate(kbScale, [1.15, 1.22], {
+      duration: 20,
+      repeat: Infinity,
+      repeatType: "mirror",
+      ease: "easeInOut",
+    });
+    return () => controls.stop();
+  }, [kbScale, reduceMotion]);
 
   const word = {
     hidden: { y: 20 },
@@ -74,7 +128,7 @@ export default function Hero({ loading, onSearch }: HeroProps) {
             <motion.img
               src={PHOTOS.hero}
               alt=""
-              style={{ y: photoY, scale: 1.15 }}
+              style={{ y: photoY, scale: kbScale }}
               fetchPriority="high"
               decoding="async"
             />
@@ -83,28 +137,31 @@ export default function Hero({ loading, onSearch }: HeroProps) {
 
           <div className="hero-inner">
             <div className="hero-toprow">
-              <motion.span
-                className="hero-livepill"
-                initial={reduceMotion ? false : { y: -14 }}
-                animate={{ y: 0 }}
-                transition={{ delay: 0.15, type: "spring", stiffness: 120, damping: 20 }}
-              >
-                <span className="live-dot" aria-hidden="true" />
-                LIVE PRICES · FETCHED FRESH ON EVERY SEARCH
-              </motion.span>
+              <Float delay={0} duration={6}>
+                <motion.span
+                  className="hero-livepill"
+                  initial={reduceMotion ? false : { y: -14 }}
+                  animate={{ y: 0 }}
+                  transition={{ delay: 0.15, type: "spring", stiffness: 120, damping: 20 }}
+                >
+                  <span className="live-dot" aria-hidden="true" />
+                  LIVE PRICES · FETCHED FRESH ON EVERY SEARCH
+                </motion.span>
+              </Float>
               <div className="hero-quick">
                 {QUICK.map((q, i) => (
-                  <motion.button
-                    key={q.label}
-                    type="button"
-                    className="hero-quickpill"
-                    initial={reduceMotion ? false : { y: -14 }}
-                    animate={{ y: 0 }}
-                    transition={{ delay: 0.22 + 0.06 * i, type: "spring", stiffness: 120, damping: 20 }}
-                    onClick={() => onSearch(q.query)}
-                  >
-                    {q.label} ↗
-                  </motion.button>
+                  <Float key={q.label} delay={0.4 + 0.4 * i} duration={5.5 + 0.5 * (i % 2)}>
+                    <motion.button
+                      type="button"
+                      className="hero-quickpill"
+                      initial={reduceMotion ? false : { y: -14 }}
+                      animate={{ y: 0 }}
+                      transition={{ delay: 0.22 + 0.06 * i, type: "spring", stiffness: 120, damping: 20 }}
+                      onClick={() => onSearch(q.query)}
+                    >
+                      {q.label} ↗
+                    </motion.button>
+                  </Float>
                 ))}
               </div>
             </div>
@@ -129,24 +186,30 @@ export default function Hero({ loading, onSearch }: HeroProps) {
               </div>
 
               <div className="hero-glasscards">
-                <motion.div
-                  className="hero-glass"
-                  initial={reduceMotion ? false : { y: 24 }}
-                  animate={{ y: 0 }}
-                  transition={{ delay: 0.7, type: "spring", stiffness: 90, damping: 18 }}
-                >
-                  <span className="hero-glass-title">18 stores tracked</span>
-                  <span className="hero-glass-sub">checked in a single search</span>
-                </motion.div>
-                <motion.div
-                  className="hero-glass"
-                  initial={reduceMotion ? false : { y: 24 }}
-                  animate={{ y: 0 }}
-                  transition={{ delay: 0.82, type: "spring", stiffness: 90, damping: 18 }}
-                >
-                  <span className="hero-glass-title">Direct links</span>
-                  <span className="hero-glass-sub">straight to the store&rsquo;s own product page</span>
-                </motion.div>
+                <Float delay={0.3} duration={6.5}>
+                  <motion.div
+                    className="hero-glass"
+                    initial={reduceMotion ? false : { y: 24 }}
+                    animate={{ y: 0 }}
+                    transition={{ delay: 0.7, type: "spring", stiffness: 90, damping: 18 }}
+                  >
+                    <span className="glass-shine" aria-hidden="true" />
+                    <span className="hero-glass-title">18 stores tracked</span>
+                    <span className="hero-glass-sub">checked in a single search</span>
+                  </motion.div>
+                </Float>
+                <Float delay={0.9} duration={5.8}>
+                  <motion.div
+                    className="hero-glass"
+                    initial={reduceMotion ? false : { y: 24 }}
+                    animate={{ y: 0 }}
+                    transition={{ delay: 0.82, type: "spring", stiffness: 90, damping: 18 }}
+                  >
+                    <span className="glass-shine" aria-hidden="true" />
+                    <span className="hero-glass-title">Direct links</span>
+                    <span className="hero-glass-sub">straight to the store&rsquo;s own product page</span>
+                  </motion.div>
+                </Float>
               </div>
             </div>
           </div>

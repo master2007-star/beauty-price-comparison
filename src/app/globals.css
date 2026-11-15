@@ -403,6 +403,8 @@ button {
 }
 
 .hero-glass {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -414,6 +416,26 @@ button {
   border: 1px solid var(--glass-border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   color: var(--light);
+}
+
+/* Shine sweep: a diagonal light band parked fully out of view at rest
+   (left of the card), sweeping across on hover. Transform-only; clipped
+   by the card's overflow. Hover-only, so touch devices never see it, and
+   removed entirely under prefers-reduced-motion. */
+.glass-shine {
+  position: absolute;
+  top: -25%;
+  bottom: -25%;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  transform: translateX(-130%) skewX(-18deg);
+  transition: transform 0.7s ease;
+  pointer-events: none;
+}
+
+.hero-glass:hover .glass-shine {
+  transform: translateX(330%) skewX(-18deg);
 }
 
 .hero-glass-title {
@@ -563,6 +585,17 @@ button {
 .btn-sm {
   padding: 8px 16px;
   font-size: 0.85rem;
+}
+
+/* Magnetic buttons: framer-motion owns the transform (spring motion
+   values), so a CSS transform transition would lag every frame — only the
+   background transitions. The CSS hover lift is superseded by the
+   magnetic pull on fine-pointer devices; on touch there is no hover, and
+   under prefers-reduced-motion the hover lift is already neutralised
+   below. */
+.btn.magnetic-btn,
+.cta-btn.magnetic-btn {
+  transition: background 0.15s ease;
 }
 
 /* Rolling button label (AestheticMatch repeating-text button): two copies
@@ -822,7 +855,7 @@ img.bento-photo {
 }
 
 .bento-tile:hover img.bento-photo {
-  transform: scale(1.04);
+  transform: scale(1.05);
 }
 
 .bento-shade {
@@ -1031,6 +1064,14 @@ img.bento-photo {
      intact with margin while the hand and ear stay in frame. Bento tile
      (creamTile) uses its own crop and is untouched. */
   object-position: 35% 50%;
+  /* Hover zoom (transform-only, clipped by .how-photo's overflow). The
+     container's entrance rise is framer on the wrapper — different
+     element, no conflict. */
+  transition: transform 0.5s ease;
+}
+
+.how-photo:hover img {
+  transform: scale(1.05);
 }
 
 .how-steps {
@@ -1153,6 +1194,22 @@ img.bento-photo {
 
 .fav-photo {
   margin: 0;
+}
+
+/* Clipping frame for the hover zoom: without it the scaled img would
+   paint over the caption. Same box as the img, so resting layout is
+   unchanged. */
+.fav-photo-frame {
+  overflow: hidden;
+  border-radius: 32px;
+}
+
+.fav-photo-frame img {
+  transition: transform 0.5s ease;
+}
+
+.fav-photo:hover .fav-photo-frame img {
+  transform: scale(1.05);
 }
 
 .fav-photo img {
@@ -2035,6 +2092,13 @@ img.bento-photo {
   }
   .bento-tile:hover img.bento-photo {
     transform: none;
+  }
+  .how-photo:hover img,
+  .fav-photo:hover .fav-photo-frame img {
+    transform: none;
+  }
+  .glass-shine {
+    display: none;
   }
   .bento-tile:hover .bento-arrow,
   .cta-btn:hover,
