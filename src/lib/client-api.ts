@@ -1,5 +1,7 @@
 import type {
   CompareResponse,
+  RefreshPricesRequest,
+  RefreshPricesResponse,
   ResolveLinksRequest,
   ResolveLinksResponse,
   SearchResponse,
@@ -13,11 +15,12 @@ export class LockedError extends Error {
   }
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (res.status === 401) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -44,6 +47,13 @@ export function compareQueries(queries: string[]): Promise<CompareResponse> {
 
 export function resolveLinks(req: ResolveLinksRequest): Promise<ResolveLinksResponse> {
   return postJson<ResolveLinksResponse>("/api/resolve-links", req);
+}
+
+export function refreshPrices(
+  req: RefreshPricesRequest,
+  signal?: AbortSignal,
+): Promise<RefreshPricesResponse> {
+  return postJson<RefreshPricesResponse>("/api/refresh-prices", req, signal);
 }
 
 export async function fetchStatus(): Promise<StatusResponse> {

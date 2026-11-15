@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { resolveLinks } from "@/lib/client-api";
-import type { Offer, ProductGroup, SearchResponse } from "@/lib/types";
+import { refreshPrices, resolveLinks } from "@/lib/client-api";
+import { formatPrice } from "@/lib/format";
+import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 
 export type SortMode = "price" | "saving";
@@ -141,23 +142,42 @@ function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer
 /** All compared store rows for one product group, cheapest first (grouping
  *  already sorts offers by price and marks the cheapest + deltas). When
  *  showTitles is set, a row whose listing title differs from the group
- *  title shows it, so the shopper can confirm it is the same variant. */
-function StoreRows({ group, showTitles = false }: { group: ProductGroup; showTitles?: boolean }) {
+ *  title shows it, so the shopper can confirm it is the same variant.
+ *  Rows with a refreshed live price (INR only) show it with a LIVE
+ *  badge; every other row keeps its Google snapshot price silently. */
+function StoreRows({
+  group,
+  showTitles = false,
+  livePrices = {},
+}: {
+  group: ProductGroup;
+  showTitles?: boolean;
+  livePrices?: Record<string, RefreshPricesResult>;
+}) {
   return (
     <div className="store-rows">
-      {group.offers.map((offer, i) => (
-        <div className="store-row" key={`${offer.store}-${offer.price}-${i}`}>
-          <span className="store-name">{offer.store}</span>
-          <span className="store-via">via {PROVIDER_LABELS[offer.provider]}</span>
-          {offer.isCheapest ? <span className="flag-cheapest">Lowest</span> : null}
-          <span className="store-price">{offer.priceLabel}</span>
-          {offer.deltaLabel ? <span className="delta">{offer.deltaLabel}</span> : null}
-          <StoreButton offer={offer} groupOffers={group.offers} />
-          {showTitles && offer.title !== group.title ? (
-            <span className="store-listed-as">Listed as “{offer.title}”</span>
-          ) : null}
-        </div>
-      ))}
+      {group.offers.map((offer, i) => {
+        const key = `${offer.store}-${offer.price}-${i}`;
+        const live = livePrices[key];
+        const livePrice =
+          live && live.status === "live" && live.currency === "INR" ? live.livePrice : null;
+        return (
+          <div className="store-row" key={key}>
+            <span className="store-name">{offer.store}</span>
+            <span className="store-via">via {PROVIDER_LABELS[offer.provider]}</span>
+            {offer.isCheapest ? <span className="flag-cheapest">Lowest</span> : null}
+            <span className="store-price">
+              {livePrice !== null ? formatPrice(livePrice, "INR") : offer.priceLabel}
+            </span>
+            {livePrice !== null ? <span className="flag-live">Live</span> : null}
+            {offer.deltaLabel ? <span className="delta">{offer.deltaLabel}</span> : null}
+            <StoreButton offer={offer} groupOffers={group.offers} />
+            {showTitles && offer.title !== group.title ? (
+              <span className="store-listed-as">Listed as “{offer.title}”</span>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -225,8 +245,44 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
 }
 
 /** Focused detail view for one product: name, image, variant summary, and
- *  every compared store price with a working store link per row. */
+ *  every compared store price with a working store link per row. Opening
+ *  the detail fires one live-price refresh for the group's rows; the
+ *  header stats stay the Google snapshot (the disclaimer below them
+ *  says so). Refresh results are NOT fed into StoreButton — no
+ *  direct-link warming in v1. */
 function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => void }) {
+  const [livePrices, setLivePrices] = useState<Record<string, RefreshPricesResult>>({});
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const items = group.offers.map((offer, i) => {
+      const pool = pooledIdentities(offer, group.offers);
+      return {
+        key: `${offer.store}-${offer.price}-${i}`,
+        store: offer.store,
+        price: offer.price,
+        productId: offer.productId ?? undefined,
+        catalogId: offer.catalogId ?? undefined,
+        productIds: pool.productIds,
+        catalogIds: pool.catalogIds,
+        productToken: offer.productToken ?? undefined,
+        productTokens: pool.productTokens,
+        immersiveTokens: pool.immersiveTokens,
+      };
+    });
+    refreshPrices({ items }, controller.signal)
+      .then((res) => {
+        const map: Record<string, RefreshPricesResult> = {};
+        for (const r of res.results) map[r.key] = r;
+        setLivePrices(map);
+      })
+      .catch(() => {
+        // Silent: any failure (including abort on back/unmount) leaves
+        // the Google snapshot prices on screen.
+      });
+    return () => controller.abort();
+  }, [group]);
+
   return (
     <motion.div
       initial={{ y: 16 }}
@@ -272,7 +328,7 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
             <div className="small muted">Prices are from Google Shopping — the store&rsquo;s live price may differ.</div>
           </div>
         </div>
-        <StoreRows group={group} showTitles />
+        <StoreRows group={group} showTitles livePrices={livePrices} />
       </div>
       <button type="button" className="btn btn-sm btn-ghost detail-back-bottom" onClick={onBack}>
         ← Back to results
