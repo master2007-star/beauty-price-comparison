@@ -5,9 +5,11 @@
  *  1. SerpApi google_immersive_product by page_token (more_stores=true)
  *     — stores come back in product_results.stores. Verified live
  *     2026-11-16: every store `link` is a Google redirect URL (aclk),
- *     NOT a merchant URL, so a name-matching seller's link is followed
- *     to its merchant destination (adurl param first, else one redirect
- *     follow) before it counts as a match.
+ *     NOT a merchant URL, so a name-matching seller's link is resolved
+ *     to its merchant destination where possible (adurl param first,
+ *     else one redirect follow); when resolution fails the redirect
+ *     URL itself is returned, since in the user's browser it lands on
+ *     the merchant's product page.
  *     This replaced the retired google_product id route, which always
  *     answered "Google Product hasn't returned any results for this
  *     query" and burned a SerpApi credit on every call; no id-based
@@ -138,6 +140,8 @@ interface ProviderAttempt {
   missingFields: number;
   /** Google redirect links successfully followed to a merchant URL. */
   redirectsResolved: number;
+  /** Google-redirect entries whose name matched the clicked store. */
+  nameMatchedRedirects: number;
   /** First seller that passed the name gate but whose price differed. */
   priceMismatch: { name: string; sellerPrice: number } | null;
   /** First seller that passed the name gate but listed no price. */
@@ -145,7 +149,7 @@ interface ProviderAttempt {
 }
 
 function emptyAttempt(): ProviderAttempt {
-  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, entriesSeen: 0, googleRedirectLinks: 0, missingFields: 0, redirectsResolved: 0, priceMismatch: null, nameMatchedNoPrice: null };
+  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, entriesSeen: 0, googleRedirectLinks: 0, missingFields: 0, redirectsResolved: 0, nameMatchedRedirects: 0, priceMismatch: null, nameMatchedNoPrice: null };
 }
 
 function recordFailure(attempt: ProviderAttempt, detail: string) {
@@ -214,7 +218,7 @@ async function resolveRedirectLink(link: string): Promise<string | null> {
       method: "GET",
       redirect: "follow",
       signal: controller.signal,
-      headers: { "user-agent": "Mozilla/5.0 (compatible; BeautyPriceComparison/1.0)" },
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" },
     });
     return isMerchantUrl(res.url) ? res.url : null;
   } catch {
@@ -279,17 +283,24 @@ async function viaSerpApiImmersive(
       if (!name || !link) { attempt.missingFields += 1; continue; }
       if (!isMerchantUrl(link)) {
         // Google redirect link (the norm for immersive stores): only
-        // pay for a redirect follow when the name already matches the
-        // clicked store, and cap follows per resolve.
+        // consider entries whose name matches the clicked store. Prefer
+        // the resolved merchant URL, but fall back to the redirect URL
+        // itself — in the user's browser it lands on the merchant's
+        // product page, which is the direct-link behaviour. Server-side
+        // follows often fail (Google serves bots an interstitial
+        // instead of redirecting), so a failed follow must not lose a
+        // name-matched seller.
         attempt.googleRedirectLinks += 1;
-        if (follows >= MAX_REDIRECT_FOLLOWS) continue;
         if (store && !storesMatch(name, store)) continue;
-        follows += 1;
-        const resolved = await resolveRedirectLink(link);
-        if (!resolved) continue;
-        attempt.redirectsResolved += 1;
+        attempt.nameMatchedRedirects += 1;
+        let finalUrl: string | null = null;
+        if (follows < MAX_REDIRECT_FOLLOWS) {
+          follows += 1;
+          finalUrl = await resolveRedirectLink(link);
+          if (finalUrl) attempt.redirectsResolved += 1;
+        }
         const p = asNumber(r.extracted_price) ?? asNumber(r.price);
-        const hit = evaluateSeller(name, resolved, p, store, undefined, attempt);
+        const hit = evaluateSeller(name, finalUrl ?? link, p, store, undefined, attempt);
         if (hit) return { hit, attempt };
         continue;
       }
@@ -365,6 +376,9 @@ function attemptDetail(label: string, a: ProviderAttempt): string {
   }
   if (a.redirectsResolved > 0) {
     parts.push(`${a.redirectsResolved} redirect${a.redirectsResolved === 1 ? "" : "s"} followed to a store page`);
+  }
+  if (a.nameMatchedRedirects > 0) {
+    parts.push(`${a.nameMatchedRedirects} name-matched redirect${a.nameMatchedRedirects === 1 ? "" : "s"}`);
   }
   if (a.missingFields > 0) {
     parts.push(`${a.missingFields} missing name/link`);
