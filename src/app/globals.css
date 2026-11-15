@@ -5,33 +5,42 @@
    system stacks as fallback if the font variables are ever absent.
 
    Glass is used ONLY where the artifact shows it: the hero pills and glass
-   cards, the sticky search bar, and the floating hero search pill. Bento
-   tiles, stat cards, why cards and FAQ cards stay solid.
+   cards, the sticky search bar, and the arrow discs on photo tiles. The
+   floating hero search pill is solid paper (measured). Bento tiles, stat
+   cards, why cards and FAQ cards stay solid.
 
    Motion safety rule: below-fold entrances are transform-only (y). Opacity
    is never animated on scroll-into-view, so no control can ever sit
    invisible. The UI respects prefers-reduced-motion (see the block at the
    end of this file). */
 
+/* Colour tokens are exact pixel samples from the reference screenshots
+   (median/mode of flat regions; text colours from stroke interiors). */
 :root {
-  --cream: #faf5ed;
+  --cream: #f9f2ec;
   --cream-2: #f3ebdd;
-  --paper: #fffdf8;
-  --ink: #1f2a1a;
-  --ink-soft: #5c6653;
-  --ink-faint: #8b9183;
-  --line: #e5ddcf;
-  --terra: #e05a2b;
+  --paper: #fffdf9;
+  --ink: #22301a;
+  --ink-soft: #6f7561;
+  --ink-faint: #6f7561;
+  --line: #e3d9c8;
+  --terra: #e36941;
   --terra-deep: #c24a20;
-  --olive: #2e3d1f;
+  --olive: #22301a;
   --olive-deep: #243018;
-  --sage: #e8ead9;
-  --lime: #e4f67a;
+  --sage: #e7e9d4;
+  --lime: #f8ff78;
   --lime-hover: #edfb92;
+  /* Chips/pills text + lime-tile title (exact pixel samples). */
+  --ink-chip: #2e3a24;
+  /* Bento olive tile + status dot (exact pixel samples). */
+  --olive-mid: #4a5b35;
+  /* Light text on dark fills (exact pixel samples). */
+  --light: #fdfbf5;
   --danger: #b3261e;
   --ok: #2e6b34;
-  --shadow: 0 18px 40px rgba(31, 42, 26, 0.12);
-  --shadow-sm: 0 6px 18px rgba(31, 42, 26, 0.08);
+  --shadow: 0 18px 40px rgba(34, 48, 26, 0.12);
+  --shadow-sm: 0 6px 18px rgba(34, 48, 26, 0.08);
   --radius: 28px;
   --radius-lg: 40px;
   --font-display: var(--font-fraunces, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif);
@@ -41,8 +50,7 @@
   --glass-dark: rgba(20, 26, 16, 0.42);
   --glass-dark-hover: rgba(20, 26, 16, 0.55);
   --glass-border: rgba(255, 255, 255, 0.38);
-  --glass-light: rgba(250, 245, 237, 0.78);
-  --glass-white: rgba(255, 253, 248, 0.88);
+  --glass-light: rgba(249, 242, 236, 0.78);
 }
 
 * {
@@ -173,15 +181,15 @@ button {
 }
 
 .status-dot.is-on {
-  background: #3d9b4f;
-  box-shadow: 0 0 0 4px rgba(61, 155, 79, 0.16);
+  background: var(--olive-mid);
+  box-shadow: 0 0 0 4px rgba(74, 91, 53, 0.16);
 }
 
 .status-settings {
   flex: none;
   text-decoration: none;
   background: var(--olive);
-  color: var(--paper);
+  color: var(--light);
   font-size: 0.9rem;
   font-weight: 600;
   padding: 9px 20px;
@@ -285,7 +293,7 @@ button {
   backdrop-filter: blur(14px) saturate(1.3);
   border: 1px solid var(--glass-border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  color: #fff;
+  color: var(--light);
   font-family: var(--font-mono);
   font-size: 0.68rem;
   font-weight: 500;
@@ -297,8 +305,8 @@ button {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ffd84d;
-  box-shadow: 0 0 10px rgba(255, 216, 77, 0.9);
+  background: #b6aa51;
+  box-shadow: 0 0 10px rgba(182, 170, 81, 0.9);
   flex: none;
 }
 
@@ -317,7 +325,7 @@ button {
   backdrop-filter: blur(14px) saturate(1.3);
   border: 1px solid var(--glass-border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  color: #fff;
+  color: var(--light);
   font-size: 0.9rem;
   font-weight: 500;
   white-space: nowrap;
@@ -347,12 +355,12 @@ button {
   font-size: 0.72rem;
   font-weight: 500;
   letter-spacing: 0.22em;
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(253, 251, 245, 0.92);
 }
 
 .hero-copy h1 {
   margin: 16px 0 0;
-  color: #fff;
+  color: var(--light);
   font-size: clamp(3rem, 6.4vw, 4.5rem);
   line-height: 1.02;
   text-wrap: balance;
@@ -360,7 +368,7 @@ button {
 
 .hero-sub {
   margin: 18px 0 0;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(253, 251, 245, 0.88);
   font-size: clamp(1rem, 1.6vw, 1.12rem);
   line-height: 1.6;
   max-width: 52ch;
@@ -385,7 +393,7 @@ button {
   backdrop-filter: blur(14px) saturate(1.3);
   border: 1px solid var(--glass-border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  color: #fff;
+  color: var(--light);
 }
 
 .hero-glass-title {
@@ -397,14 +405,13 @@ button {
 
 .hero-glass-sub {
   font-size: 0.88rem;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(253, 251, 245, 0.82);
 }
 
 /* Straddling search: half overlapping the hero's bottom edge. The pill is
-   glassy white — translucent + blur — so the photo shows faintly through
-   where it overlaps the card, while staying a white pill. Positioning is
-   pure CSS: the wrapper must stay a plain div (a motion transform would
-   override the straddle translate). */
+   solid paper (measured opaque over the photo in the reference).
+   Positioning is pure CSS: the wrapper must stay a plain div (a motion
+   transform would override the straddle translate). */
 .hero-search {
   position: absolute;
   left: 50%;
@@ -415,12 +422,10 @@ button {
 }
 
 .hero-search .search-row {
-  background: var(--glass-white);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  backdrop-filter: blur(16px) saturate(1.4);
+  background: var(--paper);
   border: 1px solid rgba(255, 255, 255, 0.75);
   border-radius: 999px;
-  box-shadow: 0 18px 40px rgba(31, 42, 26, 0.22);
+  box-shadow: 0 18px 40px rgba(34, 48, 26, 0.22);
   padding: 8px 8px 8px 22px;
 }
 
@@ -490,7 +495,7 @@ button {
 .search-input:focus {
   outline: none;
   background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 0 0 2px rgba(224, 90, 43, 0.35);
+  box-shadow: 0 0 0 2px rgba(227, 105, 65, 0.35);
 }
 
 .btn {
@@ -500,7 +505,7 @@ button {
   font-weight: 650;
   font-size: 0.95rem;
   background: var(--olive);
-  color: var(--paper);
+  color: var(--light);
   transition: transform 0.15s ease, background 0.15s ease;
   white-space: nowrap;
 }
@@ -517,7 +522,7 @@ button {
 
 .btn-terra {
   background: var(--terra);
-  color: #fff;
+  color: var(--light);
 }
 
 .btn-terra:hover:not(:disabled) {
@@ -553,8 +558,8 @@ button {
   background: var(--glass-light);
   -webkit-backdrop-filter: blur(16px) saturate(1.5);
   backdrop-filter: blur(16px) saturate(1.5);
-  border-bottom: 1px solid rgba(229, 221, 207, 0.85);
-  box-shadow: 0 8px 24px rgba(31, 42, 26, 0.08);
+  border-bottom: 1px solid rgba(227, 217, 200, 0.85);
+  box-shadow: 0 8px 24px rgba(34, 48, 26, 0.08);
 }
 
 .sticky-search-inner {
@@ -603,8 +608,8 @@ button {
   border-radius: 999px;
   padding: 10px 20px;
   font-size: 0.92rem;
-  color: var(--ink);
-  box-shadow: 0 2px 8px rgba(31, 42, 26, 0.05);
+  color: var(--ink-chip);
+  box-shadow: 0 2px 8px rgba(34, 48, 26, 0.05);
   transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
@@ -639,12 +644,12 @@ button {
 }
 
 .recent-chip {
-  border: 1px solid #dbdec8;
+  border: 1px solid transparent;
   background: var(--sage);
   border-radius: 999px;
   padding: 8px 16px;
   font-size: 0.88rem;
-  color: var(--ink);
+  color: var(--ink-chip);
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
@@ -679,7 +684,7 @@ button {
   font-family: var(--font-display);
   font-size: clamp(1.2rem, 2.4vw, 1.45rem);
   white-space: nowrap;
-  color: #6b7263;
+  color: #666d5c;
 }
 
 .marquee-item .dot {
@@ -774,49 +779,64 @@ img.bento-photo {
 .bento-shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(31, 42, 26, 0.05) 0%, rgba(31, 42, 26, 0.55) 78%);
+  background: linear-gradient(180deg, rgba(34, 48, 26, 0.05) 0%, rgba(34, 48, 26, 0.55) 78%);
 }
 
 .bento-tile.bento-photo {
-  color: #fff;
+  color: var(--light);
   border-color: transparent;
 }
 
 .bento-tile.bento-photo .bento-sub {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(253, 251, 245, 0.85);
+}
+
+/* Arrow discs on photo tiles are dark glass, matching the hero glass. */
+.bento-tile.bento-photo .bento-arrow {
+  background: var(--glass-dark);
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  backdrop-filter: blur(10px) saturate(1.3);
+  border-color: transparent;
+  color: var(--light);
 }
 
 .bento-lime {
   background: var(--lime);
-  border-color: #d3e86a;
+  border-color: transparent;
+  color: var(--ink-chip);
 }
 
 .bento-lime .bento-sub {
-  color: rgba(31, 42, 26, 0.72);
+  color: rgba(34, 48, 26, 0.66);
 }
 
 .bento-olive {
-  background: var(--olive);
-  color: #f4f1e8;
+  background: var(--olive-mid);
+  color: #f4f1de;
   border-color: transparent;
 }
 
 .bento-olive .bento-sub {
-  color: rgba(244, 241, 232, 0.75);
+  color: rgba(244, 241, 222, 0.73);
 }
 
 .bento-olive .bento-arrow {
-  background: var(--lime);
-  border-color: transparent;
+  background: transparent;
+  border-color: rgba(244, 241, 222, 0.68);
 }
 
 .bento-cream {
-  background: #f3e9d8;
+  background: #f3e7d8;
+  border-color: transparent;
+}
+
+.bento-cream .bento-sub {
+  color: #5f6552;
 }
 
 .bento-sage {
   background: var(--sage);
-  border-color: #dbdec8;
+  border-color: transparent;
 }
 
 .bento-text {
@@ -851,9 +871,9 @@ img.bento-photo {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--paper);
-  color: var(--ink);
-  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(34, 48, 26, 0.7);
   font-size: 1.1rem;
   line-height: 1;
   transition: transform 0.2s ease;
@@ -1049,7 +1069,7 @@ img.bento-photo {
   height: 38px;
   border-radius: 50%;
   border: 1px solid var(--line);
-  background: var(--paper);
+  background: transparent;
   display: grid;
   place-items: center;
   font-size: 1rem;
@@ -1058,7 +1078,7 @@ img.bento-photo {
 
 .fav-row:hover .fav-arrow {
   background: var(--olive);
-  color: #fff;
+  color: var(--light);
   border-color: var(--olive);
 }
 
@@ -1103,7 +1123,7 @@ img.bento-photo {
   right: -80px;
   width: 480px;
   height: 480px;
-  background: radial-gradient(circle, rgba(224, 90, 43, 0.16), transparent 65%);
+  background: radial-gradient(circle, rgba(227, 105, 65, 0.16), transparent 65%);
   pointer-events: none;
 }
 
@@ -1129,7 +1149,7 @@ img.bento-photo {
   height: 52px;
   border-radius: 14px;
   background: var(--lime);
-  color: var(--ink);
+  color: var(--ink-chip);
   display: grid;
   place-items: center;
   font-size: 1.35rem;
@@ -1218,7 +1238,7 @@ img.bento-photo {
 .faq-icon.is-open {
   background: var(--olive);
   border-color: var(--olive);
-  color: #fff;
+  color: var(--light);
 }
 
 /* ------------------------------- CTA band ------------------------------- */
@@ -1228,7 +1248,7 @@ img.bento-photo {
   overflow: hidden;
   isolation: isolate;
   background: var(--olive);
-  color: var(--paper);
+  color: var(--light);
   border-radius: var(--radius-lg);
   padding: clamp(48px, 8vw, 88px) clamp(24px, 6vw, 64px);
   text-align: center;
@@ -1256,12 +1276,12 @@ img.bento-photo {
   font-size: 0.72rem;
   font-weight: 500;
   letter-spacing: 0.22em;
-  color: rgba(255, 253, 248, 0.65);
+  color: #c9c4a5;
 }
 
 .cta-band h2 {
   margin: 18px 0 0;
-  color: #fff;
+  color: var(--light);
   font-size: clamp(2.4rem, 6vw, 4rem);
   line-height: 1.05;
   text-wrap: balance;
@@ -1269,7 +1289,7 @@ img.bento-photo {
 
 .cta-band p {
   margin: 16px auto 0;
-  color: rgba(255, 253, 248, 0.8);
+  color: rgba(255, 253, 249, 0.74);
   max-width: 48ch;
   font-size: 1.05rem;
   line-height: 1.6;
@@ -1283,7 +1303,7 @@ img.bento-photo {
   font-weight: 650;
   font-size: 1rem;
   background: var(--lime);
-  color: var(--ink);
+  color: var(--ink-chip);
   transition: transform 0.15s ease, background 0.15s ease;
 }
 
@@ -1476,7 +1496,7 @@ img.bento-photo {
 
 .flag-cheapest {
   background: var(--olive);
-  color: #fff;
+  color: var(--light);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1609,7 +1629,7 @@ img.bento-photo {
   padding: 40px 16px;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 253, 248, 0.6);
+  background: rgba(255, 253, 249, 0.6);
 }
 
 /* ------------------------------- modal ------------------------------- */
@@ -1618,7 +1638,7 @@ img.bento-photo {
   position: fixed;
   inset: 0;
   z-index: 70;
-  background: rgba(31, 42, 26, 0.5);
+  background: rgba(34, 48, 26, 0.5);
   -webkit-backdrop-filter: blur(8px) saturate(1.2);
   backdrop-filter: blur(8px) saturate(1.2);
   display: flex;
@@ -1736,7 +1756,7 @@ img.bento-photo {
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(600px 300px at 80% 0%, rgba(224, 90, 43, 0.12), transparent 60%),
+    radial-gradient(600px 300px at 80% 0%, rgba(227, 105, 65, 0.12), transparent 60%),
     var(--cream);
 }
 
@@ -1908,7 +1928,7 @@ img.bento-photo {
   text-decoration: none;
   font-size: 0.9rem;
   font-weight: 550;
-  color: var(--ink);
+  color: var(--ink-chip);
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
