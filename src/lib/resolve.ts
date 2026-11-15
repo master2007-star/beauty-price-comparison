@@ -126,6 +126,12 @@ interface ProviderAttempt {
   failures: string[];
   /** Seller entries that passed the name/link/merchant-URL checks. */
   sellersSeen: number;
+  /** Raw seller entries found in the responses, before any checks. */
+  entriesSeen: number;
+  /** Entries with a name and a link whose host is Google (redirect links, rejected by the merchant check). */
+  googleRedirectLinks: number;
+  /** Entries missing a usable name or link. */
+  missingFields: number;
   /** First seller that passed the name gate but whose price differed. */
   priceMismatch: { name: string; sellerPrice: number } | null;
   /** First seller that passed the name gate but listed no price. */
@@ -133,7 +139,7 @@ interface ProviderAttempt {
 }
 
 function emptyAttempt(): ProviderAttempt {
-  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, priceMismatch: null, nameMatchedNoPrice: null };
+  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, entriesSeen: 0, googleRedirectLinks: 0, missingFields: 0, priceMismatch: null, nameMatchedNoPrice: null };
 }
 
 function recordFailure(attempt: ProviderAttempt, detail: string) {
@@ -213,12 +219,15 @@ async function viaSerpApiImmersive(
     const stores = asArray(productResults?.stores);
     const fallback =
       stores.length > 0 ? [] : [...asArray(outcome.json.stores), ...asArray(outcome.json.sellers)];
-    for (const item of [...stores, ...fallback]) {
+    const entries = [...stores, ...fallback];
+    attempt.entriesSeen += entries.length;
+    for (const item of entries) {
       const r = asRecord(item);
-      if (!r) continue;
+      if (!r) { attempt.missingFields += 1; continue; }
       const name = asString(r.name) ?? asString(r.source) ?? asString(r.store);
       const link = asString(r.link);
-      if (!name || !link || !isMerchantUrl(link)) continue;
+      if (!name || !link) { attempt.missingFields += 1; continue; }
+      if (!isMerchantUrl(link)) { attempt.googleRedirectLinks += 1; continue; }
       const p = asNumber(r.extracted_price) ?? asNumber(r.price);
       const hit = evaluateSeller(name, link, p, store, undefined, attempt);
       if (hit) return { hit, attempt };
@@ -255,13 +264,16 @@ async function viaSearchApi(
       recordFailure(attempt, failureDetail(outcome));
       continue;
     }
-    for (const item of asArray(outcome.json.offers)) {
+    const offers = asArray(outcome.json.offers);
+    attempt.entriesSeen += offers.length;
+    for (const item of offers) {
       const r = asRecord(item);
-      if (!r) continue;
+      if (!r) { attempt.missingFields += 1; continue; }
       const merchant = asRecord(r.merchant);
       const name = asString(merchant?.name) ?? asString(r.seller);
       const link = asString(r.link);
-      if (!name || !link || !isMerchantUrl(link)) continue;
+      if (!name || !link) { attempt.missingFields += 1; continue; }
+      if (!isMerchantUrl(link)) { attempt.googleRedirectLinks += 1; continue; }
       const p = asNumber(r.extracted_price);
       const hit = evaluateSeller(name, link, p, store, undefined, attempt);
       if (hit) return { hit, attempt };
@@ -272,6 +284,24 @@ async function viaSearchApi(
 
 function dedupeValues(values: (string | undefined)[]): string[] {
   return [...new Set(values.filter((v): v is string => Boolean(v)))];
+}
+
+/**
+ * Counts-only detail for the no-sellers case: distinguishes "the
+ * response had no store entries" from "entries existed but every link
+ * was a Google redirect" from "entries lacked a name or link". Counts
+ * only — no URLs, hosts, tokens or keys.
+ */
+function attemptDetail(label: string, a: ProviderAttempt): string {
+  if (a.requests === 0) return "";
+  const parts = [`${a.entriesSeen} seller ${a.entriesSeen === 1 ? "entry" : "entries"}`];
+  if (a.googleRedirectLinks > 0) {
+    parts.push(`${a.googleRedirectLinks} Google redirect link${a.googleRedirectLinks === 1 ? "" : "s"}`);
+  }
+  if (a.missingFields > 0) {
+    parts.push(`${a.missingFields} missing name/link`);
+  }
+  return ` ${label}: ${parts.join(", ")} across ${a.requests} request${a.requests === 1 ? "" : "s"}.`;
 }
 
 function noMatchReason(
@@ -298,7 +328,8 @@ function noMatchReason(
     return `All link-resolution requests failed (${failures.join("; ")}).`;
   }
   if (sellersSeen === 0) {
-    return `No sellers were returned for the tried product tokens.${failureSuffix}`;
+    const detail = attemptDetail("SerpApi", serpAttempt) + attemptDetail("SearchApi", searchAttempt);
+    return `No sellers were returned for the tried product tokens.${detail}${failureSuffix}`;
   }
   if (req.store) {
     return `No seller named "${req.store}" among the ${sellersSeen} seller${sellersSeen === 1 ? "" : "s"} returned.${failureSuffix}`;

@@ -5,6 +5,7 @@
  */
 import { configuredProviders, envVarName, getConfig, type AppConfig } from "./env";
 import { defaultCurrencyForRegion } from "./format";
+import { filterBeautyOffers } from "./beauty-filter";
 import { buildGroups, dedupeOffers, extractQueryBrand, flattenOffers } from "./grouping";
 import { PROVIDER_FETCHERS } from "./providers";
 import type {
@@ -66,7 +67,11 @@ export async function runSearch(query: string, cfg: AppConfig = getConfig()): Pr
   }
 
   const deduped = dedupeOffers(offers);
-  const groups = buildGroups(deduped, defaultCurrencyForRegion(cfg.region), extractQueryBrand(query));
+  // Beauty-only site: drop obvious non-beauty fuzzy matches (sports gear,
+  // electronics, groceries…) before grouping. Covers /api/compare too,
+  // since runCompare delegates to runSearch.
+  const relevant = filterBeautyOffers(deduped);
+  const groups = buildGroups(relevant, defaultCurrencyForRegion(cfg.region), extractQueryBrand(query));
   return {
     query,
     status: "ok",
