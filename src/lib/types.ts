@@ -161,6 +161,12 @@ export interface RefreshPricesResult {
   status: "live" | "unavailable";
   livePrice: number | null;
   currency: string | null;
+  /** The server-resolved store page URL for this row, when the
+   *  resolver produced one — returned even when the price fetch
+   *  failed, so the client can open the store page without a second
+   *  resolve round-trip. Never a client-supplied URL and never a
+   *  Google Shopping productUrl. */
+  directUrl?: string;
 }
 
 export interface RefreshPricesRequest {

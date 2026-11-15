@@ -19,8 +19,11 @@
  * returned by the server's own resolveDirectLink is ever fetched, and
  * only when it is a public http(s) URL. A price is only ever extracted
  * from a page whose final URL (after redirects) is a merchant host —
- * never from a Google page the redirect chain may have landed on. No
- * resolved URL is ever echoed back to the client.
+ * never from a Google page the redirect chain may have landed on. The
+ * resolved URL itself IS returned to the client (as the warmed direct
+ * link for the row), even when the price fetch fails: it is the
+ * server-resolved URL only, never a client-supplied URL and never a
+ * Google Shopping productUrl.
  */
 import type { AppConfig } from "./env";
 import { parsePriceLabel } from "./format";
@@ -403,10 +406,15 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
     );
     const url = resolved.directUrl;
     if (!url || !isFetchableUrl(url)) return unavailable;
+    // The resolved link rides along with every result below, so the
+    // client can open the store page without a second resolve
+    // round-trip — even when the price fetch fails. It is the
+    // server-resolved URL only (see the SSRF rules above).
+    const warmed = { directUrl: url };
     const page = await fetchPageText(url);
-    if (!page) return unavailable;
+    if (!page) return { ...unavailable, ...warmed };
     const found = extractJsonLdPrice(page.html);
-    if (found) return { key: item.key, status: "live", livePrice: found.price, currency: found.currency };
+    if (found) return { key: item.key, status: "live", livePrice: found.price, currency: found.currency, ...warmed };
     // Amazon PDPs carry no JSON-LD price: twister extraction, then the
     // SerpApi amazon_product fallback. Host-gated on the FINAL URL —
     // the Amazon extractor must never run on a non-Amazon page.
@@ -419,14 +427,14 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
     if (finalHost === "amazon.in" || finalHost.endsWith(".amazon.in")) {
       const amazon = extractAmazonPrice(page.html);
       if (amazon) {
-        return { key: item.key, status: "live", livePrice: amazon.price, currency: amazon.currency };
+        return { key: item.key, status: "live", livePrice: amazon.price, currency: amazon.currency, ...warmed };
       }
       const viaApi = await fetchAmazonProductPrice(url, page.finalUrl, cfg);
       if (viaApi) {
-        return { key: item.key, status: "live", livePrice: viaApi.price, currency: viaApi.currency };
+        return { key: item.key, status: "live", livePrice: viaApi.price, currency: viaApi.currency, ...warmed };
       }
     }
-    return unavailable;
+    return { ...unavailable, ...warmed };
   } catch {
     return unavailable;
   }
@@ -435,7 +443,8 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
 /**
  * Refresh up to MAX_ITEMS rows in parallel. Every item gets a result;
  * anything that fails at any stage reports "unavailable" for that row
- * only. No URLs are returned.
+ * only. Results carry the server-resolved direct URL whenever the
+ * resolver produced one, so the client can warm the row's store link.
  */
 export async function refreshLivePrices(
   items: RefreshPricesItem[],

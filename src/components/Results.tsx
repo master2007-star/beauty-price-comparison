@@ -72,13 +72,36 @@ function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
   };
 }
 
-function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer[] }) {
+/** Minimal loading page written into the pre-opened tab while the
+ *  resolve runs, so the user never stares at a blank about:blank page
+ *  while waiting. Inline only — no external assets, no scripts. */
+const LOADING_PAGE_HTML =
+  '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Store khul raha hai…</title><style>body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#F9F2EC;color:#22301A;font-family:system-ui,-apple-system,sans-serif}.spin{width:28px;height:28px;border-radius:50%;border:3px solid #E3D9C8;border-top-color:#E36941;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="spin"></div><div>Store khul raha hai…</div></body></html>';
+
+function StoreButton({
+  offer,
+  groupOffers,
+  warmedDirectUrl,
+}: {
+  offer: Offer;
+  groupOffers?: Offer[];
+  /** Direct link warmed by the detail view's refresh (the server
+   *  already resolved this row's store page). When present, the click
+   *  opens it synchronously — no await, no blank tab, no resolve
+   *  call. Absent while the refresh is pending, for rows beyond the
+   *  refresh cap, or when the resolve produced nothing. */
+  warmedDirectUrl?: string | null;
+}) {
   const [state, setState] = useState<"idle" | "checking" | "fallback">("idle");
   const [direct, setDirect] = useState<string | null>(offer.directUrl);
 
   async function go() {
     if (direct) {
       window.open(direct, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (warmedDirectUrl) {
+      window.open(warmedDirectUrl, "_blank", "noopener,noreferrer");
       return;
     }
     const pool = pooledIdentities(offer, groupOffers);
@@ -93,6 +116,14 @@ function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer
     // Android Chrome). The tab is navigated once the link is known, or
     // closed when there is nothing to open.
     const tab = window.open("", "_blank", "noopener,noreferrer");
+    if (tab) {
+      try {
+        tab.document.write(LOADING_PAGE_HTML);
+        tab.document.close();
+      } catch {
+        // A tab that refuses the write still navigates below.
+      }
+    }
     setState("checking");
     try {
       const res = await resolveLinks({
@@ -171,7 +202,7 @@ function StoreRows({
             </span>
             {livePrice !== null ? <span className="flag-live">Live</span> : null}
             {offer.deltaLabel ? <span className="delta">{offer.deltaLabel}</span> : null}
-            <StoreButton offer={offer} groupOffers={group.offers} />
+            <StoreButton offer={offer} groupOffers={group.offers} warmedDirectUrl={live?.directUrl} />
             {showTitles && offer.title !== group.title ? (
               <span className="store-listed-as">Listed as “{offer.title}”</span>
             ) : null}
@@ -248,8 +279,9 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
  *  every compared store price with a working store link per row. Opening
  *  the detail fires one live-price refresh for the group's rows; the
  *  header stats stay the Google snapshot (the disclaimer below them
- *  says so). Refresh results are NOT fed into StoreButton — no
- *  direct-link warming in v1. */
+ *  says so). The refresh results also warm each row's store link: the
+ *  server already resolved the store page, so a warmed row opens it
+ *  synchronously on click instead of resolving again. */
 function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => void }) {
   const [livePrices, setLivePrices] = useState<Record<string, RefreshPricesResult>>({});
 
