@@ -1,0 +1,115 @@
+# Beauty Price Comparison (standalone)
+
+A standalone, deployable beauty price comparison app. Search once, and it queries
+Google Shopping through up to four providers in parallel, groups listings by the
+exact product variant (same size, pack count, SPF and form), and shows every
+store's price side by side — lowest first, with the saving spelled out.
+
+This is a fresh, self-contained Next.js (App Router + TypeScript) implementation.
+It has no dependency on any other codebase.
+
+## How it works
+
+- **Search** — `POST /api/search` fans out to every configured provider, merges
+  and dedupes offers, groups them into same-variant products, and returns
+  groups + a flat lowest-first offer list.
+- **Grouping** — same Google catalog id **and** same variant signature, or same
+  brand + strong title overlap + same variant signature. Anything unsure splits
+  into its own group. Sizes are strict with unit normalisation
+  (16 fl oz = 473 ml).
+- **Direct links** — `POST /api/resolve-links` tries SerpApi's `google_product`
+  engine (by product/catalog id) and SearchApi's `google_product_offers` engine
+  (via `product_token`, up to 3 tokens). A seller only counts when the store
+  name **and** the exact price both match; otherwise the UI falls back honestly
+  to the Google Shopping product page and says so.
+- **Deep compare** — `POST /api/compare` runs up to 3 queries and aligns
+  products across them (catalog-anchored, size-strict).
+- **Status** — `GET /api/status` reports region, language, lock state and per
+  provider configured/last-4 only. Full keys are never exposed.
+- **App lock (optional)** — when `APP_PASSCODE` is set, a passcode gate covers
+  the app and its APIs. Verification is server-side with a constant-time
+  compare, sessions are HMAC-signed HttpOnly cookies, and 5 wrong tries lock a
+  visitor out for 5 minutes. When unset, there is no lock screen at all.
+- **Honesty** — if no provider key is configured, the UI says plainly which
+  environment variables to set. Provider failures surface as warnings, never as
+  fake data. No prices, stores or results are ever invented.
+
+## Environment variables
+
+Copy `.env.example` to `.env.local` for local development. On Vercel, set them
+under Project → Settings → Environment Variables.
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `SERPAPI_KEY` | At least one provider | SerpApi key (serpapi.com) |
+| `SEARCHAPI_KEY` | At least one provider | SearchApi.io key (searchapi.io) |
+| `SERPER_KEY` | At least one provider | Serper key (serper.dev) |
+| `SEARLO_KEY` | At least one provider | Searlo key (searlo.tech) |
+| `REGION` | No (default `in`) | Google Shopping country (`gl`) |
+| `LANGUAGE` | No (default `en`) | Google Shopping language (`hl`) |
+| `APP_PASSCODE` | No | Optional app-lock passcode |
+| `SESSION_SECRET` | No | Optional cookie signing secret (derived from the passcode when unset) |
+
+## Local development
+
+```bash
+npm install
+cp .env.example .env.local   # then fill in at least one provider key
+npm run dev                  # http://localhost:3000
+```
+
+Verify the grouping engine without any keys or network:
+
+```bash
+npm run check:grouping
+```
+
+## Deploy to Vercel
+
+1. Push this folder to a Git repository (GitHub, GitLab or Bitbucket).
+2. In Vercel, **Add New → Project**, and import the repository.
+3. Vercel auto-detects Next.js — keep the defaults (build command `next build`,
+   output directory `.next`).
+4. Before deploying, add your environment variables under **Settings →
+   Environment Variables** (at least one provider key; see the table above).
+5. Click **Deploy**. The app is live on the assigned `*.vercel.app` domain.
+
+To deploy without git: `npm i -g vercel`, then `vercel` from this folder and
+follow the prompts, adding env vars with `vercel env add` first.
+
+## Provider notes
+
+Request/response formats follow each provider's published documentation
+(checked November 2026):
+
+- **SerpApi** — `GET serpapi.com/search?engine=google_shopping` reads
+  `shopping_results[]`; `engine=google_product&product_id=…&offers=true` reads
+  `sellers_results.online_sellers[]`.
+- **SearchApi.io** — `GET searchapi.io/api/v1/search?engine=google_shopping`
+  reads `shopping_results[]` (plus `shopping_ads[]`); `engine=google_product_offers`
+  requires a `product_token` minted by the shopping call (since their May 2026
+  breaking change, `product_id` is no longer accepted there) and reads `offers[]`.
+- **Serper** — `POST google.serper.dev/shopping` with the `X-API-KEY` header
+  reads `shopping[]`. Note: each call spends credits.
+- **Searlo** — `GET api.searlo.tech/api/v1/search/shopping` with the `x-api-key`
+  header, following Searlo's documented `/search/*` REST pattern and the
+  `q`/`gl`/`hl`/`limit` parameters used by its other search endpoints.
+  ⚠️ The shopping endpoint's exact path and response keys could not be fully
+  confirmed from Searlo's public docs index, so the client parses defensively
+  (accepting `shopping`, `results`, `products` or `organic` arrays) and reports
+  any mismatch as a provider error. Run one live search after deploying to
+  confirm Searlo returns results; if it errors, the other providers keep
+  working and the error names Searlo explicitly.
+
+## Frontend notes
+
+- Cream/serif/editorial design with Framer Motion throughout: parallax hero,
+  staggered headline, floating glass badges, reading-progress bar, sticky search
+  bar, store marquee, category bento, animated stat counters, FAQ accordion and
+  an animated compare modal.
+- **Motion safety rule:** below-fold entrances are transform-only (no opacity
+  gated on scroll-into-view), so no control can ever sit invisible. The UI
+  respects `prefers-reduced-motion`.
+- Stats show live-computed values from your latest search, or honest placeholders
+  before the first search. No numbers are invented.
+- System font stacks only — the build never depends on a font CDN.

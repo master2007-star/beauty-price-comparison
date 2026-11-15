@@ -1,0 +1,137 @@
+export type ProviderId = "serpapi" | "searchapi" | "serper" | "searlo";
+
+export const PROVIDER_IDS: ProviderId[] = ["serpapi", "searchapi", "serper", "searlo"];
+
+export const PROVIDER_LABELS: Record<ProviderId, string> = {
+  serpapi: "SerpApi",
+  searchapi: "SearchApi.io",
+  serper: "Serper",
+  searlo: "Searlo",
+};
+
+/** One priced (or unpriced) listing as normalised from a provider. */
+export interface RawOffer {
+  price: number | null;
+  /** Provider's own display string, when available. */
+  priceLabel: string | null;
+  currency: string | null;
+  store: string;
+  title: string;
+  provider: ProviderId;
+  productUrl: string | null;
+  directUrl: string | null;
+  rating: number | null;
+  reviews: number | null;
+  imageUrl: string | null;
+  catalogId: string | null;
+  productId: string | null;
+  productToken: string | null;
+}
+
+/** A priced offer as returned to the client. */
+export interface Offer {
+  price: number;
+  priceLabel: string;
+  currency: string;
+  store: string;
+  title: string;
+  provider: ProviderId;
+  productUrl: string | null;
+  directUrl: string | null;
+  rating: number | null;
+  reviews: number | null;
+  imageUrl: string | null;
+  catalogId: string | null;
+  productId: string | null;
+  productToken: string | null;
+  /** True when this is the cheapest offer in its group. */
+  isCheapest?: boolean;
+  /** "+₹X vs lowest" for non-cheapest offers, null for the cheapest. */
+  deltaLabel?: string | null;
+}
+
+export interface ProductGroup {
+  id: string;
+  title: string;
+  imageUrl: string | null;
+  currency: string;
+  lowestPrice: number;
+  lowestLabel: string;
+  highestPrice: number;
+  highestLabel: string;
+  storeCount: number;
+  savingsLabel: string;
+  savingsPercent: number;
+  rating: number | null;
+  reviews: number | null;
+  offers: Offer[];
+}
+
+export interface ProviderError {
+  provider: ProviderId;
+  message: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  status: "ok" | "no_providers" | "error";
+  providersUsed: ProviderId[];
+  providerErrors: ProviderError[];
+  groups: ProductGroup[];
+  offers: Offer[];
+  searchedAt: string;
+  message?: string;
+}
+
+export interface CompareResult {
+  query: string;
+  status: SearchResponse["status"];
+  providersUsed: ProviderId[];
+  providerErrors: ProviderError[];
+  groups: ProductGroup[];
+  offers: Offer[];
+}
+
+/** A product that appears in more than one of the compared queries. */
+export interface AlignedMatch {
+  key: string;
+  title: string;
+  imageUrl: string | null;
+  currency: string;
+  perQuery: Array<{
+    query: string;
+    lowestPrice: number | null;
+    lowestLabel: string | null;
+    storeCount: number;
+  }>;
+}
+
+export interface CompareResponse {
+  queries: string[];
+  results: CompareResult[];
+  aligned: AlignedMatch[];
+  searchedAt: string;
+}
+
+export interface ResolveLinksRequest {
+  productId?: string;
+  catalogId?: string;
+  productToken?: string;
+  productTokens?: string[];
+  store?: string;
+  price?: number;
+}
+
+export interface ResolveLinksResponse {
+  directUrl: string | null;
+  matchedStore: string | null;
+  source: ProviderId | null;
+  reason?: string;
+}
+
+export interface StatusResponse {
+  region: string;
+  language: string;
+  passcodeSet: boolean;
+  providers: Record<ProviderId, { configured: boolean; last4: string | null }>;
+}

@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# env files — never commit real keys. .env.example is the documented template.
+.env
+.env*.local
+!.env.example
+
+# misc
+*.tsbuildinfo
+.DS_Store
