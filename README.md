@@ -51,6 +51,38 @@ under Project → Settings → Environment Variables.
 | `LANGUAGE` | No (default `en`) | Google Shopping language (`hl`) |
 | `APP_PASSCODE` | No | Optional app-lock passcode |
 | `SESSION_SECRET` | No | Optional cookie signing secret (derived from the passcode when unset) |
+| `AUTH_GOOGLE_ID` | No | Optional Google login: OAuth client ID (see below) |
+| `AUTH_GOOGLE_SECRET` | No | Optional Google login: OAuth client secret (see below) |
+| `AUTH_SECRET` | No | Optional Google login: random string for signing session cookies |
+
+## Google login (optional)
+
+Signing in is optional — the site works exactly the same without it. No
+route is gated and there is no login wall. When the three `AUTH_*`
+variables below are all set, a "Sign in with Google" pill appears in the
+top bar and a `/login` page is available; without them, no login UI is
+shown at all. Sessions use Auth.js v5 JWT cookies — there is no database
+and no user table. This is separate from the `APP_PASSCODE` app lock.
+
+Setup (the person deploying does this; no credentials live in the code):
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create
+   a project (or reuse one) and configure the **OAuth consent screen**
+   (User type: External).
+2. Go to **Credentials → Create Credentials → OAuth client ID**,
+   application type **Web application**.
+3. Under **Authorized redirect URIs**, add exactly:
+   `https://beauty-price-comparison.vercel.app/api/auth/callback/google`
+4. Copy the generated **Client ID** and **Client secret**.
+5. In Vercel → Project → Settings → Environment Variables, set:
+   - `AUTH_GOOGLE_ID` = the Client ID
+   - `AUTH_GOOGLE_SECRET` = the Client secret
+   - `AUTH_SECRET` = any long random string (e.g. `openssl rand -base64 32`)
+6. Redeploy. The sign-in pill appears in the top bar.
+
+For local development, the same three variables go in `.env.local`, and
+the redirect URI registered in Google Cloud Console must be
+`http://localhost:3000/api/auth/callback/google` instead.
 
 ## Local development
 

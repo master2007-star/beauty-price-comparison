@@ -52,3 +52,15 @@ export function last4(key: string | undefined): string | null {
 export function envVarName(id: ProviderId): string {
   return ENV_KEYS[id];
 }
+
+/**
+ * True when optional Google login is fully configured: the OAuth client
+ * id + secret AND the session secret must all be present. Auth.js needs
+ * AUTH_SECRET to sign its JWT session cookie, so a deployment with only
+ * the client credentials would show a dead sign-in button — requiring
+ * all three keeps the button honest. When false, no login UI is shown
+ * anywhere and the app behaves exactly as before.
+ */
+export function isGoogleLoginConfigured(): boolean {
+  return Boolean(readEnv("AUTH_GOOGLE_ID") && readEnv("AUTH_GOOGLE_SECRET") && readEnv("AUTH_SECRET"));
+}

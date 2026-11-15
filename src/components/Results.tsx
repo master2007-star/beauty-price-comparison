@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { refreshPrices, resolveLinks } from "@/lib/client-api";
 import { formatPrice } from "@/lib/format";
 import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 
-export type SortMode = "price" | "saving" | "stores" | "rating";
+export type SortMode = "price" | "saving";
 export type ViewMode = "groups" | "offers";
 
 interface ResultsProps {
@@ -175,15 +175,7 @@ function StoreButton({
  *  showTitles is set, a row whose listing title differs from the group
  *  title shows it, so the shopper can confirm it is the same variant.
  *  Rows with a refreshed live price (INR only) show it with a LIVE
- *  badge; every other row keeps its Google snapshot price silently.
- *  Each row also carries a mini bar showing where its Google snapshot
- *  price sits between the group's lowest and highest price: the
- *  cheapest row's fill is lime, other rows olive, and when every price
- *  is equal the bar is a full-width neutral bar (never a division by
- *  zero). Bars always use the snapshot prices, even when a live price
- *  is shown — the live price is one store's page, not the comparison
- *  range. The bar is decorative (the price is in text beside it), so it
- *  is hidden from assistive tech. */
+ *  badge; every other row keeps its Google snapshot price silently. */
 function StoreRows({
   group,
   showTitles = false,
@@ -193,10 +185,6 @@ function StoreRows({
   showTitles?: boolean;
   livePrices?: Record<string, RefreshPricesResult>;
 }) {
-  const reduceMotion = useReducedMotion();
-  const low = group.lowestPrice;
-  const high = group.highestPrice;
-  const flat = high <= low;
   return (
     <div className="store-rows">
       {group.offers.map((offer, i) => {
@@ -204,10 +192,6 @@ function StoreRows({
         const live = livePrices[key];
         const livePrice =
           live && live.status === "live" && live.currency === "INR" ? live.livePrice : null;
-        // Position of this row's price in the group range. The 8% floor
-        // keeps the cheapest row's lime segment visible instead of an
-        // empty track; the exact price is always in text beside the bar.
-        const pct = flat ? 1 : Math.max(0.08, Math.min(1, (offer.price - low) / (high - low)));
         return (
           <div className="store-row" key={key}>
             <span className="store-name">{offer.store}</span>
@@ -222,82 +206,9 @@ function StoreRows({
             {showTitles && offer.title !== group.title ? (
               <span className="store-listed-as">Listed as “{offer.title}”</span>
             ) : null}
-            <div className="store-row-bar" aria-hidden="true">
-              <div className="store-row-bar-track">
-                <motion.div
-                  className={`store-row-bar-fill${flat ? " is-flat" : offer.isCheapest ? " is-cheapest" : ""}`}
-                  initial={reduceMotion ? false : { scaleX: 0 }}
-                  animate={{ scaleX: pct }}
-                  transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                />
-              </div>
-            </div>
           </div>
         );
       })}
-    </div>
-  );
-}
-
-/** Price-span bar on a group card: a track running from the group's
- *  cheapest offer to its most expensive, with one dot per distinct
- *  offer price along it and the lowest price marked in terracotta. The
- *  end labels reuse the group's own lowestLabel/highestLabel — no price
- *  is ever invented. A group with a single price (one store, or every
- *  store at the same price) shows one centred dot and one label, never
- *  a fake range. Decorative: the same prices are in text on the card,
- *  so the bar is hidden from assistive tech. */
-function GroupPriceBar({ group }: { group: ProductGroup }) {
-  const reduceMotion = useReducedMotion();
-  const low = group.lowestPrice;
-  const high = group.highestPrice;
-  const flat = group.offers.length < 2 || high <= low;
-  if (flat) {
-    return (
-      <div className="price-span" aria-hidden="true">
-        <div className="price-span-track">
-          <span className="price-span-line" />
-          <span className="price-span-dot is-only" />
-        </div>
-        <div className="price-span-labels is-single">
-          <span>{group.lowestLabel}</span>
-        </div>
-      </div>
-    );
-  }
-  const seen = new Set<number>();
-  const dots = group.offers
-    .map((o) => ({ pct: ((o.price - low) / (high - low)) * 100, cheapest: o.price === low }))
-    .filter((d) => {
-      const bucket = Math.round(d.pct * 10);
-      if (seen.has(bucket)) return false;
-      seen.add(bucket);
-      return true;
-    });
-  return (
-    <div className="price-span" aria-hidden="true">
-      <div className="price-span-track">
-        <motion.div
-          className="price-span-line"
-          initial={reduceMotion ? false : { scaleX: 0 }}
-          animate={{ scaleX: 1 }}
-          transition={{ type: "spring", stiffness: 80, damping: 20 }}
-        />
-        {dots.map((d, i) => (
-          <motion.span
-            key={`${Math.round(d.pct * 10)}-${i}`}
-            className={`price-span-dot${d.cheapest ? " is-lowest" : ""}`}
-            style={{ left: `${d.pct}%`, x: "-50%" }}
-            initial={reduceMotion ? false : { scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 300, damping: 18, delay: 0.08 + i * 0.04 }}
-          />
-        ))}
-      </div>
-      <div className="price-span-labels">
-        <span>{group.lowestLabel}</span>
-        <span>{group.highestLabel}</span>
-      </div>
     </div>
   );
 }
@@ -356,7 +267,6 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
           </div>
         ))}
       </div>
-      <GroupPriceBar group={group} />
       <div className="group-cta" aria-hidden="true">
         <span>View all {group.storeCount} {group.storeCount === 1 ? "price" : "prices"}</span>
         <span className="group-cta-arrow">→</span>
@@ -465,28 +375,15 @@ function scrollToResults() {
 
 export default function Results({ results, sort, view, onSortChange, onViewChange, onCompare }: ResultsProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Toolbar filters: client-side only, over the groups already returned.
-  // A store chip keeps groups with at least one offer from that store;
-  // several chips act as an OR. The multi-store toggle hides
-  // single-store groups. Both reset with every new search.
-  const [selectedStores, setSelectedStores] = useState<string[]>([]);
-  const [multiStoreOnly, setMultiStoreOnly] = useState(false);
 
-  // A new search replaces the list, so any open detail view closes with
-  // it and the toolbar filters reset (store names are per-search).
+  // A new search replaces the list, so any open detail view closes with it.
   useEffect(() => {
     setSelectedId(null);
-    setSelectedStores([]);
-    setMultiStoreOnly(false);
   }, [results]);
 
   const groups = useMemo(() => {
     const list = [...results.groups];
     if (sort === "saving") list.sort((a, b) => b.savingsPercent - a.savingsPercent || a.lowestPrice - b.lowestPrice);
-    else if (sort === "stores") list.sort((a, b) => b.storeCount - a.storeCount || a.lowestPrice - b.lowestPrice);
-    // Top rated: highest rating first, more reviews breaking ties, then
-    // lowest price. Groups without a rating sort last.
-    else if (sort === "rating") list.sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1) || (b.reviews ?? 0) - (a.reviews ?? 0) || a.lowestPrice - b.lowestPrice);
     // Default "lowest price" sort keeps the grouping tier order: real
     // multi-store comparisons first, then single-store groups, lowest
     // price within each tier.
@@ -494,46 +391,15 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
     return list;
   }, [results.groups, sort]);
 
-  const stores = useMemo(() => {
-    const set = new Set<string>();
-    for (const g of results.groups) for (const o of g.offers) set.add(o.store);
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [results.groups]);
-
-  const visibleGroups = useMemo(() => {
-    let list = groups;
-    if (selectedStores.length > 0) {
-      const wanted = new Set(selectedStores);
-      list = list.filter((g) => g.offers.some((o) => wanted.has(o.store)));
-    }
-    if (multiStoreOnly) list = list.filter((g) => g.storeCount > 1);
-    return list;
-  }, [groups, selectedStores, multiStoreOnly]);
-
-  const filtersActive = selectedStores.length > 0 || multiStoreOnly;
-
   const selected = view === "groups" && selectedId ? groups.find((g) => g.id === selectedId) ?? null : null;
 
   const best = useMemo(() => {
-    // The banner highlights the biggest saving among the products
-    // actually on screen: the filtered groups in the grouped view, all
-    // groups in the flat view (which the toolbar does not filter).
-    const pool = view === "groups" ? visibleGroups : results.groups;
     let pick: ProductGroup | null = null;
-    for (const g of pool) {
+    for (const g of results.groups) {
       if (g.savingsPercent > 0 && (!pick || g.savingsPercent > pick.savingsPercent)) pick = g;
     }
     return pick;
-  }, [visibleGroups, results.groups, view]);
-
-  function toggleStore(store: string) {
-    setSelectedStores((prev) => (prev.includes(store) ? prev.filter((s) => s !== store) : [...prev, store]));
-  }
-
-  function clearFilters() {
-    setSelectedStores([]);
-    setMultiStoreOnly(false);
-  }
+  }, [results.groups]);
 
   function openDetail(group: ProductGroup) {
     setSelectedId(group.id);
@@ -570,8 +436,6 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
           <select id="sort-select" className="select" value={sort} onChange={(e) => handleSortChange(e.target.value as SortMode)}>
             <option value="price">Lowest price</option>
             <option value="saving">Biggest saving</option>
-            <option value="stores">Most stores</option>
-            <option value="rating">Top rated</option>
           </select>
           <button type="button" className="btn btn-sm" onClick={onCompare}>Deep compare</button>
         </div>
@@ -608,43 +472,6 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
               </div>
             ) : null}
 
-            {groups.length > 0 && view === "groups" ? (
-              <div className="results-toolbar">
-                <span className="toolbar-label">Stores</span>
-                <div className="filter-chips" role="group" aria-label="Filter by store">
-                  {stores.map((store) => (
-                    <button
-                      type="button"
-                      key={store}
-                      className="filter-chip"
-                      aria-pressed={selectedStores.includes(store)}
-                      onClick={() => toggleStore(store)}
-                    >
-                      {store}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className="filter-chip filter-toggle"
-                  aria-pressed={multiStoreOnly}
-                  onClick={() => setMultiStoreOnly((v) => !v)}
-                >
-                  Multi-store only
-                </button>
-                {filtersActive ? (
-                  <>
-                    <button type="button" className="filter-clear" onClick={clearFilters}>
-                      Clear filters
-                    </button>
-                    <span className="filter-count">
-                      Showing {visibleGroups.length} of {groups.length} {groups.length === 1 ? "product" : "products"}
-                    </span>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-
             {groups.length === 0 ? (
               <div className="empty-state">
                 <p className="display" style={{ fontSize: "1.3rem", margin: "0 0 8px" }}>No priced results found.</p>
@@ -653,25 +480,13 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
                 </p>
               </div>
             ) : view === "groups" ? (
-              visibleGroups.length === 0 ? (
-                <div className="empty-state">
-                  <p className="display" style={{ fontSize: "1.3rem", margin: "0 0 8px" }}>No products match these filters.</p>
-                  <p className="muted" style={{ margin: "0 0 14px" }}>
-                    Try removing a store or turning off “Multi-store only”.
-                  </p>
-                  <button type="button" className="btn btn-sm" onClick={clearFilters}>
-                    Clear filters
-                  </button>
-                </div>
-              ) : (
-                <motion.div layout>
-                  <AnimatePresence initial={false}>
-                    {visibleGroups.map((g) => (
-                      <GroupCard key={g.id} group={g} onOpen={openDetail} />
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              )
+              <motion.div layout>
+                <AnimatePresence initial={false}>
+                  {groups.map((g) => (
+                    <GroupCard key={g.id} group={g} onOpen={openDetail} />
+                  ))}
+                </AnimatePresence>
+              </motion.div>
             ) : (
               <motion.div layout>
                 <AnimatePresence initial={false}>

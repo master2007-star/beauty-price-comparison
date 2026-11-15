@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Fraunces, IBM_Plex_Mono, Inter } from "next/font/google";
 import Link from "next/link";
+import AuthSessionProvider from "@/components/AuthSessionProvider";
 import LockGate from "@/components/LockGate";
 import ProgressBar from "@/components/ProgressBar";
 import TopStatus from "@/components/TopStatus";
-import { getConfig } from "@/lib/env";
+import { getConfig, isGoogleLoginConfigured } from "@/lib/env";
 import { isLockEnabled, isValidSession } from "@/lib/lock";
 import "./globals.css";
 
@@ -51,15 +52,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const cfg = getConfig();
   const cookieHeader = (await cookies()).toString();
   const initialLocked = isLockEnabled(cfg) && !isValidSession(cookieHeader, cfg);
+  // Optional Google login: decided server-side from env. When unconfigured
+  // no session provider mounts and no login UI renders anywhere.
+  const googleConfigured = isGoogleLoginConfigured();
 
   return (
     <html lang="en" className={`${fraunces.variable} ${inter.variable} ${plexMono.variable}`}>
       <body>
-        <ProgressBar />
-        <TopStatus />
-        <LockGate initialLocked={initialLocked}>
-          <main>{children}</main>
-        </LockGate>
+        <AuthSessionProvider enabled={googleConfigured}>
+          <ProgressBar />
+          <TopStatus googleConfigured={googleConfigured} />
+          <LockGate initialLocked={initialLocked}>
+            <main>{children}</main>
+          </LockGate>
         <footer className="footer">
           <div className="wrap">
             <div className="footer-top">
@@ -82,6 +87,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <p className="footer-mono">SERPAPI · SEARCHAPI.IO · SERPER · SEARLO — VIA GOOGLE SHOPPING</p>
           </div>
         </footer>
+        </AuthSessionProvider>
       </body>
     </html>
   );
