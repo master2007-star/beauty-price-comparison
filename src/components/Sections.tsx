@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useInView, useReducedMotion } from "framer-motion";
 import { PHOTOS } from "./photos";
+import RollLabel from "./RollLabel";
 
 /**
  * Below-fold entrances are TRANSFORM-ONLY (y). Opacity is never animated
@@ -174,6 +175,7 @@ const STATS = [
 ];
 
 export function StatsCards() {
+  const reduceMotion = useReducedMotion();
   return (
     <section className="section section-tight" aria-label="About this comparison">
       <div className="wrap">
@@ -186,6 +188,7 @@ export function StatsCards() {
               variants={rise}
               initial="hidden"
               whileInView="show"
+              whileHover={reduceMotion ? undefined : { y: -4 }}
               viewport={{ once: true, margin: "-40px" }}
             >
               <div className="stat-number">
@@ -284,6 +287,7 @@ const FAVOURITES = [
 ];
 
 export function RepeatFavourites({ onSearch }: { onSearch: (query: string) => void }) {
+  const reduceMotion = useReducedMotion();
   return (
     <section className="section" aria-label="Repeat favourites">
       <div className="wrap fav-grid">
@@ -303,6 +307,7 @@ export function RepeatFavourites({ onSearch }: { onSearch: (query: string) => vo
                 variants={rise}
                 initial="hidden"
                 whileInView="show"
+                whileHover={reduceMotion ? undefined : { y: -2 }}
                 viewport={{ once: true, margin: "-40px" }}
                 onClick={() => onSearch(fav.query)}
               >
@@ -501,8 +506,8 @@ export function ClosingCta({ onStart }: { onStart: () => void }) {
             price you see.
           </h2>
           <p>Name the product. See every store that sells it. Buy it once, at the right price.</p>
-          <button type="button" className="cta-btn" onClick={onStart}>
-            Compare a product now ↑
+          <button type="button" className="cta-btn roll-btn" onClick={onStart}>
+            <RollLabel text="Compare a product now ↑" />
           </button>
         </motion.div>
       </div>

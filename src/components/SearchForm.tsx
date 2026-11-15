@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import RollLabel from "./RollLabel";
 
 interface SearchFormProps {
   initialValue?: string;
@@ -41,8 +42,8 @@ export default function SearchForm({
           autoComplete="off"
           maxLength={120}
         />
-        <button className="btn" type="submit" disabled={loading || value.trim().length < 2}>
-          {loading ? "Searching…" : "Compare prices"}
+        <button className="btn roll-btn" type="submit" disabled={loading || value.trim().length < 2}>
+          <RollLabel text={loading ? "Searching…" : "Compare prices"} />
         </button>
       </div>
     </form>

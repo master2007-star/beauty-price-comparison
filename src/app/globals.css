@@ -39,8 +39,13 @@
   --light: #fdfbf5;
   --danger: #b3261e;
   --ok: #2e6b34;
-  --shadow: 0 18px 40px rgba(34, 48, 26, 0.12);
-  --shadow-sm: 0 6px 18px rgba(34, 48, 26, 0.08);
+  /* Soft shadows, adapted from the AestheticMatch spec's single soft recipe
+     (rgba(0,0,0,0.05) 0 2px 4px): the contact layer matches it, tinted to
+     the warm ink, with a diffuse second layer so cards keep their depth
+     instead of flattening. --shadow-hover is the deepened hover state. */
+  --shadow: 0 2px 4px rgba(34, 48, 26, 0.05), 0 24px 48px rgba(34, 48, 26, 0.1);
+  --shadow-sm: 0 2px 4px rgba(34, 48, 26, 0.05), 0 10px 24px rgba(34, 48, 26, 0.06);
+  --shadow-hover: 0 4px 8px rgba(34, 48, 26, 0.06), 0 20px 44px rgba(34, 48, 26, 0.12);
   --radius: 28px;
   --radius-lg: 40px;
   --font-display: var(--font-fraunces, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif);
@@ -135,7 +140,22 @@ button {
   font-family: var(--font-display);
   font-weight: 500;
   line-height: 1.04;
-  letter-spacing: -0.01em;
+  /* AestheticMatch headline tracking (-0.04em). Font family unchanged. */
+  letter-spacing: -0.04em;
+}
+
+/* Smaller display-font titles sit at the spec's -0.02em title tracking.
+   (Headings carrying .display already get -0.04em above and are excluded
+   here, so the more specific selectors below cannot override it.) */
+.bento-title,
+.faq-q,
+.footer-title,
+.group-title,
+.hero-glass-title,
+.notice h3,
+.settings-card h3,
+.why-card h3 {
+  letter-spacing: -0.02em;
 }
 
 .muted {
@@ -545,6 +565,35 @@ button {
   font-size: 0.85rem;
 }
 
+/* Rolling button label (AestheticMatch repeating-text button): two copies
+   of the label are stacked; on hover the stack slides up one line so the
+   duplicate rolls into place. Transform-only. At rest the wrapper is
+   exactly one line tall (the duplicate is absolutely positioned below the
+   clip), so the resting render matches a plain label. The spec's "0.001s
+   transitions" line is a measurement artifact and is ignored — 300ms ease. */
+.roll-label {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.roll-line {
+  display: block;
+  transition: transform 0.3s ease;
+  will-change: transform;
+}
+
+.roll-line + .roll-line {
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+}
+
+.roll-btn:hover .roll-line {
+  transform: translateY(-100%);
+}
+
 /* ------------------------- sticky search bar ------------------------- */
 /* Glassy: translucent cream + blur, so page content shows faintly through
    as it slides in. The input keeps a near-solid fill for readability. */
@@ -752,11 +801,11 @@ button {
   flex-direction: column;
   justify-content: flex-end;
   color: var(--ink);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.25s ease;
 }
 
 .bento-tile:hover {
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-hover);
 }
 
 .bento-wide {
@@ -914,6 +963,12 @@ img.bento-photo {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 30px 28px;
+  /* Lift is framer whileHover (transform); shadow deepens here. */
+  transition: box-shadow 0.25s ease;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-hover);
 }
 
 .stat-number {
@@ -970,6 +1025,12 @@ img.bento-photo {
   width: 100%;
   aspect-ratio: 9 / 11;
   object-fit: cover;
+  /* Shifted left-of-centre: at the default 50% the 9/11 crop clipped the
+     tip of the nose and the left edge of the lips (verified against the
+     source image: the face sits left-of-centre). 35% keeps the whole face
+     intact with margin while the hand and ear stay in frame. Bento tile
+     (creamTile) uses its own crop and is untouched. */
+  object-position: 35% 50%;
 }
 
 .how-steps {
@@ -1044,6 +1105,12 @@ img.bento-photo {
   padding: 20px 4px;
   text-align: left;
   color: var(--ink);
+  /* Lift is framer whileHover (transform); shadow deepens here. */
+  transition: box-shadow 0.25s ease;
+}
+
+.fav-row:hover {
+  box-shadow: var(--shadow-hover);
 }
 
 .fav-text {
@@ -1073,13 +1140,15 @@ img.bento-photo {
   display: grid;
   place-items: center;
   font-size: 1rem;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.25s ease;
 }
 
 .fav-row:hover .fav-arrow {
   background: var(--olive);
   color: var(--light);
   border-color: var(--olive);
+  /* Diagonal nudge, following the ↗ glyph (bento arrows nudge sideways). */
+  transform: translate(2px, -2px);
 }
 
 .fav-photo {
@@ -1142,6 +1211,12 @@ img.bento-photo {
   background: var(--paper);
   border-radius: var(--radius);
   padding: 28px 26px;
+  /* Lift is framer whileHover (transform); shadow deepens here. */
+  transition: box-shadow 0.25s ease;
+}
+
+.why-card:hover {
+  box-shadow: var(--shadow-hover);
 }
 
 .why-icon {
@@ -1968,7 +2043,9 @@ img.bento-photo {
   .recent-chip:hover,
   .footer-pill:hover,
   .status-settings:hover,
-  .hero-quickpill:hover {
+  .hero-quickpill:hover,
+  .fav-row:hover .fav-arrow,
+  .roll-btn:hover .roll-line {
     transform: none;
   }
 }
