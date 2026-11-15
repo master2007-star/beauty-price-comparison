@@ -115,6 +115,27 @@ export function catalogIdFromProductToken(token: string | null): string | null {
   }
 }
 
+/**
+ * Merchant-URL check, mirroring the host check in resolve.ts: returns the
+ * raw value unchanged when it is an absolute http(s) URL whose host is
+ * not a Google host, and null otherwise. A host counts as Google when it
+ * contains "google" anywhere, which covers google.com, google.co.in,
+ * googleadservices.com and googlesyndication.com. The value is never
+ * constructed, rewritten or guessed — only the provider's own raw `link`
+ * is ever returned.
+ */
+function merchantUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (parsed.hostname.toLowerCase().includes("google")) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 function baseOffer(provider: ProviderId): RawOffer {
   return {
     price: null,
@@ -158,7 +179,8 @@ export async function fetchSerpApi(query: string, cfg: AppConfig): Promise<RawOf
     const title = asString(r.title);
     if (!title) continue;
     const { price, label } = coercePrice(r.extracted_price, asString(r.price));
-    const productUrl = asString(r.product_link) ?? asString(r.link);
+    const rawLink = asString(r.link);
+    const productUrl = asString(r.product_link) ?? rawLink;
     const offer = baseOffer("serpapi");
     offer.title = title;
     offer.store = asString(r.source) ?? "Unknown store";
@@ -166,6 +188,11 @@ export async function fetchSerpApi(query: string, cfg: AppConfig): Promise<RawOf
     offer.priceLabel = label;
     offer.currency = detectCurrency(label, fallback);
     offer.productUrl = productUrl;
+    // SerpApi's `link` is the merchant's own product page (unlike
+    // `product_link`, which is the Google Shopping page). Use it verbatim
+    // when it is a merchant URL; otherwise the resolve/fallback path
+    // applies exactly as before.
+    offer.directUrl = merchantUrl(rawLink);
     offer.imageUrl = asString(r.thumbnail);
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews);
@@ -213,6 +240,9 @@ export async function fetchSearchApi(query: string, cfg: AppConfig): Promise<Raw
     offer.priceLabel = label;
     offer.currency = detectCurrency(label, fallback);
     offer.productUrl = productUrl;
+    // SearchApi's raw `link` is the merchant's own page when it is not a
+    // Google URL; use it verbatim, exactly like the sponsored ads below.
+    offer.directUrl = merchantUrl(asString(r.link));
     offer.imageUrl = asString(r.thumbnail);
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews);
@@ -231,7 +261,6 @@ export async function fetchSearchApi(query: string, cfg: AppConfig): Promise<Raw
     if (!title) continue;
     const { price, label } = coercePrice(r.extracted_price, asString(r.price));
     const link = asString(r.link);
-    const isGoogle = !!link && /^https?:\/\/(www\.)?google\.com\//.test(link);
     const offer = baseOffer("searchapi");
     offer.title = title;
     offer.store = asString(r.seller) ?? asString(r.domain) ?? "Unknown store";
@@ -239,7 +268,7 @@ export async function fetchSearchApi(query: string, cfg: AppConfig): Promise<Raw
     offer.priceLabel = label;
     offer.currency = detectCurrency(label, fallback);
     offer.productUrl = link;
-    offer.directUrl = !isGoogle ? link : null;
+    offer.directUrl = merchantUrl(link);
     offer.imageUrl = asString(r.image);
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews);
@@ -273,13 +302,17 @@ export async function fetchSerper(query: string, cfg: AppConfig): Promise<RawOff
     if (!title) continue;
     const label = asString(r.price);
     const { price } = coercePrice(null, label);
+    const rawLink = asString(r.link);
     const offer = baseOffer("serper");
     offer.title = title;
     offer.store = asString(r.source) ?? "Unknown store";
     offer.price = price;
     offer.priceLabel = label;
     offer.currency = detectCurrency(label, fallback);
-    offer.productUrl = asString(r.link);
+    offer.productUrl = rawLink;
+    // Serper's raw `link` is the merchant's own page when it is not a
+    // Google URL; use it verbatim.
+    offer.directUrl = merchantUrl(rawLink);
     offer.imageUrl = asString(r.imageUrl);
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.ratingCount);
@@ -325,7 +358,8 @@ export async function fetchSearlo(query: string, cfg: AppConfig): Promise<RawOff
     if (!title) continue;
     const label = asString(r.price);
     const { price } = coercePrice(r.extracted_price ?? r.priceValue, label);
-    const productUrl = asString(r.link) ?? asString(r.url) ?? asString(r.product_link);
+    const rawLink = asString(r.link);
+    const productUrl = rawLink ?? asString(r.url) ?? asString(r.product_link);
     const offer = baseOffer("searlo");
     offer.title = title;
     offer.store =
@@ -334,6 +368,9 @@ export async function fetchSearlo(query: string, cfg: AppConfig): Promise<RawOff
     offer.priceLabel = label;
     offer.currency = detectCurrency(label, fallback);
     offer.productUrl = productUrl;
+    // Searlo's raw `link` is the merchant's own page when it is not a
+    // Google URL; use it verbatim.
+    offer.directUrl = merchantUrl(rawLink);
     offer.imageUrl = asString(r.image) ?? asString(r.thumbnail) ?? asString(r.imageUrl);
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews) ?? asNumber(r.ratingCount);
