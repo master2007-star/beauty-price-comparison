@@ -16,7 +16,18 @@
  *    brand-less title join a group when the search query names the brand
  *    and at least one title carries that brand token — variant
  *    strictness still applies.
- * Anything unsure splits into its own group.
+ * Title-based matching (both paths above) additionally applies two
+ * guards, which never touch catalog-id matching:
+ *  - a distinctive-token guard: after dropping brand, form, size/SPF/
+ *    unit, claim and stopword tokens, if EACH title keeps a significant
+ *    token the other lacks (line names like "strawberry" vs "vitamin"),
+ *    the pair does not merge. One-sided extras (retailer noise on one
+ *    title only) still merge.
+ *  - a bundle guard: a combo/kit/duo title never merges with a single.
+ * Anything unsure splits into its own group. Non-English titles split
+ * from English ones under the token guard (their native-script words
+ * count as distinctive) — sameness across scripts is unverifiable, so
+ * splitting is the honest outcome.
  *
  * Groups are ordered with multi-store groups first (lowest price within
  * each tier), so real comparisons surface before single-store listings.
@@ -254,6 +265,142 @@ function titleHasToken(title: string, token: string): boolean {
 }
 
 /* ------------------------------------------------------------------ */
+/* Distinctive-token + bundle guards (title-based paths only)          */
+/* ------------------------------------------------------------------ */
+
+/** Standalone unit words. Digit-led tokens (50gm, 30ml, 2x) are dropped separately. */
+const UNIT_WORDS = new Set([
+  "ml", "l", "litre", "litres", "liter", "liters",
+  "millilitre", "millilitres", "milliliter", "milliliters",
+  "fl", "oz", "ounce", "ounces", "fluid",
+  "g", "gm", "gram", "grams", "kg", "kilogram", "kilograms", "mg",
+  "ct", "count", "pc", "pcs", "piece", "pieces",
+]);
+
+/** Protection-rating words: SPF/PA/UV ratings never identify a product line. */
+const RATING_WORDS = new Set([
+  "spf", "pa", "ppd", "uv", "uva", "uvb", "uvc", "broad", "spectrum",
+]);
+
+/**
+ * Generic benefit/claim/audience words that appear as retailer or
+ * marketing copy and never identify a product line. Deliberately NOT
+ * included: line/ingredient words (vitamin, strawberry, dragon, fruit,
+ * lime, watermelon, mineral, cooling, tinted, dew, swim, sports, super,
+ * bright, retinol, rose, saffron, charcoal, ...) — those stay
+ * significant so different lines split.
+ */
+const CLAIM_WORDS = new Set([
+  // Protection / testing claims
+  "protection", "protect", "protective", "protects", "defence", "defense",
+  "tested", "testing", "vivo", "dermatologically", "dermatologist",
+  "clinically", "clinical", "proven", "approved", "certified",
+  "hypoallergenic", "noncomedogenic", "comedogenic",
+  // Finish / feel
+  "white", "cast", "waterlight", "light", "lightweight", "greasy",
+  "sticky", "matte", "dewy", "sheer", "invisible", "transparent",
+  "intense", "intensive", "rich", "airy", "whipped", "velvet", "silky",
+  "smooth", "quick", "fast", "absorbing", "long", "lasting",
+  // "Free from" claims
+  "fragrance", "paraben", "sulphate", "sulfate", "alcohol", "dye",
+  "cruelty", "vegan", "free", "no", "not", "without", "non",
+  // Generic benefit descriptors
+  "glowing", "glow", "radiant", "radiance", "brightening", "brighten",
+  "even", "toned", "tone", "firming", "lifting", "tightening",
+  "hydrating", "hydrate", "moisturizing", "nourishing", "nourish",
+  "soothing", "soothe", "refreshing", "refresh", "calming",
+  "whitening", "lightening", "fairness", "dark", "spot", "pigmentation",
+  "acne", "pimple", "tan", "removal", "remover", "anti", "ageing",
+  "aging", "wrinkle", "repair", "repairing", "restore", "restoring",
+  "renew", "renewal", "rejuvenating", "care", "therapy", "treatment",
+  // Audience / skin-type noise
+  "skin", "types", "type", "all", "sun", "daily", "everyday", "gentle",
+  "mild", "sensitive", "normal", "oily", "dry", "combination",
+  "men", "women", "woman", "baby", "babies", "kids", "kid", "unisex",
+  // Generic marketing / retailer noise
+  "new", "original", "classic", "advanced", "professional", "ultra",
+  "perfect", "total", "instant", "maximum", "max", "extra", "deep",
+  "clean", "clear", "fresh", "pure", "natural", "organic", "herbal",
+  "value", "trial", "mini", "travel", "refill", "sample", "samples",
+  "tester", "online", "buy", "best", "shop", "shopping", "store",
+  "official", "authentic", "genuine", "product",
+  // Form-like product words not in FORM_WORDS
+  "essence", "elixir", "concentrate", "ampoule", "milk", "water", "blue",
+]);
+
+/** Every token class that carries no product-line identity. */
+const GENERIC_DROP = new Set<string>([
+  ...FORM_WORDS,
+  ...UNIT_WORDS,
+  ...RATING_WORDS,
+  ...CLAIM_WORDS,
+]);
+
+function isDroppedToken(t: string): boolean {
+  if (STOPWORDS.has(t) || GENERIC_DROP.has(t)) return true;
+  // Plural forms: sunscreens, spots, types, parabens.
+  if (t.endsWith("s") && GENERIC_DROP.has(t.slice(0, -1))) return true;
+  return false;
+}
+
+/**
+ * Tokens that identify the product line: brand, form, size/SPF/unit,
+ * claim, stopword and 1-char tokens removed. Tokenisation is Unicode
+ * aware (\p{L}\p{M} keeps native-script words whole), so a non-English
+ * title keeps its own significant tokens and splits from an English
+ * title — sameness across scripts is unverifiable. UK/US spelling
+ * variants (-ise/-ize, -our/-or) are normalised so the same product
+ * listed with different spellings still merges.
+ */
+export function significantTokens(title: string): Set<string> {
+  const brand = extractBrand(title);
+  const out = new Set<string>();
+  for (const raw of title.toLowerCase().split(/[^\p{L}\p{M}\p{N}%]+/u)) {
+    if (raw.length <= 1) continue;
+    if (/^\d/.test(raw)) continue; // sizes/quantities: 50gm, 30ml, 2x, 10%
+    if (/^spf\d*$/.test(raw)) continue; // spf50 written without a space
+    const t = raw
+      .replace(/ising$/, "izing")
+      .replace(/ise$/, "ize")
+      .replace(/ourite$/, "orite")
+      .replace(/our$/, "or");
+    if (t === brand) continue;
+    if (isDroppedToken(t)) continue;
+    out.add(t);
+  }
+  return out;
+}
+
+/**
+ * True when EACH title keeps at least one significant token the other
+ * lacks — the titles name different product lines, so they must not
+ * merge. One-sided extras (noise on one title only) do not fire the
+ * guard. A title with no significant tokens at all never fires it
+ * either: it carries no line identity to conflict with.
+ */
+export function hasDistinctiveTokens(a: string, b: string): boolean {
+  const ta = significantTokens(a);
+  const tb = significantTokens(b);
+  let aOnly = false;
+  let bOnly = false;
+  for (const t of ta) if (!tb.has(t)) aOnly = true;
+  for (const t of tb) if (!ta.has(t)) bOnly = true;
+  return aOnly && bOnly;
+}
+
+/** Bundle/kit signals: multi-item packs, never a single product. */
+const BUNDLE_RE = /\b(combo|bundle|kit|duo|trio|pack\s+of|value\s+pack|set\s+of)\b/i;
+
+export function isBundleTitle(title: string): boolean {
+  return BUNDLE_RE.test(title);
+}
+
+/** True when exactly one title is a bundle — a kit never merges with a single. */
+export function hasBundleMismatch(a: string, b: string): boolean {
+  return isBundleTitle(a) !== isBundleTitle(b);
+}
+
+/* ------------------------------------------------------------------ */
 /* Clustering                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -284,6 +431,10 @@ export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: stri
   // No shared catalog id: strict path — same variant signature, same
   // brand, strong title overlap. A missing size still splits here.
   if (!sameVariant(a.variant, b.variant)) return false;
+  // Guards for the title-based paths only: different product lines and
+  // bundle-vs-single pairs never merge, however strong the overlap.
+  if (hasBundleMismatch(a.offer.title, b.offer.title)) return false;
+  if (hasDistinctiveTokens(a.offer.title, b.offer.title)) return false;
   if (sameBrand(a.offer.title, b.offer.title)) {
     return titleContainment(a.offer.title, b.offer.title) >= 0.5;
   }

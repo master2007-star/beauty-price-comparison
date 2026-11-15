@@ -3,7 +3,7 @@
  * No network, no provider keys — pure unit-level checks.
  * Run: npm run check:grouping
  */
-import { buildGroups, dedupeOffers, extractQueryBrand, extractSize, sizesMatch } from "../src/lib/grouping";
+import { buildGroups, dedupeOffers, extractQueryBrand, extractSize, hasBundleMismatch, hasDistinctiveTokens, isBundleTitle, sizesMatch } from "../src/lib/grouping";
 import type { RawOffer } from "../src/lib/types";
 
 let failures = 0;
@@ -207,6 +207,123 @@ const bothBrandless = buildGroups(dedupeOffers([
   offer({ title: "Vitamin C Face Serum 30 ml", store: "Plum", price: 420 }),
 ]), "INR", "cerave");
 check("both brand-less, no query-brand token → no merge", bothBrandless.length === 2, `got ${bothBrandless.length} groups`);
+
+/* ----------------- distinctive-token + bundle guards ----------------- */
+/* Live diagnosis (Dot & Key sunscreen search): one 13-store group had
+ * merged five product lines + combos via title overlap, because shared
+ * generic tokens (brand + "sunscreen" + "SPF 50") passed the overlap
+ * bar while the line names were ignored. The guards below keep those
+ * lines apart. Catalog-id matching is untouched by the guards. */
+
+check("guard fires: Strawberry vs Vitamin C + E", hasDistinctiveTokens(
+  "Dot & Key Strawberry Dew Tinted Sunscreen SPF 50+ PA++++",
+  "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++",
+) === true);
+check("guard fires: Dragon Fruit vs Vitamin C + E", hasDistinctiveTokens(
+  "Dot & Key Dragon Fruit Bounce Sunscreen SPF 50+ PA++++",
+  "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++",
+) === true);
+check("guard quiet: one-sided retailer noise", hasDistinctiveTokens(
+  "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++",
+  "Dot & Key Vitamin C + E Super Bright Sunscreen, SPF 50+ PA++++ In-Vivo Tested At NykaaMan, Products Handpicked",
+) === false);
+check("guard quiet: same line, different claim noise", hasDistinctiveTokens(
+  "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++ No White Cast",
+  "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Water-Light, UVA/UVB & Blue Light Protection",
+) === false);
+check("bundle signal detected", isBundleTitle("Dot & Key Vitamin C Sunscreen Combo") && isBundleTitle("Skin Care Kit") && isBundleTitle("Glow Duo") && !isBundleTitle("Dot & Key Vitamin C Sunscreen"));
+check("bundle mismatch: combo vs single", hasBundleMismatch("Sunscreen Combo", "Sunscreen") === true);
+check("bundle match: two combos", hasBundleMismatch("Sunscreen Combo", "Face Wash Kit") === false);
+
+const dotKeyVariants = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++", store: "Purplle", price: 224 }),
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen, SPF 50+ PA++++ In-Vivo Tested", store: "Nykaa Man", price: 299 }),
+  offer({ title: "Dot & Key Strawberry Dew Tinted Sunscreen SPF 50+ PA++++", store: "hkcosmetics.in", price: 384 }),
+  offer({ title: "Dot & Key Dragon Fruit Bounce Sunscreen In-Vivo Tested SPF 50+ PA++++", store: "Amazon.in", price: 387 }),
+  offer({ title: "Dot & Key Lime Rush Swim + Sports SPF 50+ PA++++ Sunscreen", store: "Glamzy", price: 446 }),
+  offer({ title: "Dot & Key Watermelon Cooling Sunscreen SPF 50+", store: "blinkit.com", price: 433 }),
+  offer({ title: "Dot & Key Watermelon Cooling Sunscreen (SPF 50+) + Watermelon Super Glow Face Wash Vitamin C & Cucumber Combo", store: "blinkit.com", price: 500 }),
+]), "INR");
+check("Dot & Key variants form 6 groups, not 1", dotKeyVariants.length === 6, `got ${dotKeyVariants.length}: ${dotKeyVariants.map((g) => g.title.slice(0, 45)).join(" / ")}`);
+const vitCGroup = dotKeyVariants.find((g) => g.title.includes("Super Bright"));
+check("Vitamin C + E pair merges across 2 stores despite retailer noise", vitCGroup?.storeCount === 2, `storeCount=${vitCGroup?.storeCount}`);
+check("Strawberry is its own group", dotKeyVariants.some((g) => g.title.includes("Strawberry") && g.storeCount === 1));
+check("Dragon Fruit is its own group", dotKeyVariants.some((g) => g.title.includes("Dragon Fruit") && g.storeCount === 1));
+check("Lime Rush is its own group", dotKeyVariants.some((g) => g.title.includes("Lime Rush") && g.storeCount === 1));
+check("Watermelon single is its own group", dotKeyVariants.some((g) => g.title === "Dot & Key Watermelon Cooling Sunscreen SPF 50+" && g.storeCount === 1));
+check("Watermelon combo is its own group", dotKeyVariants.some((g) => g.title.includes("Combo") && g.storeCount === 1));
+
+const strawberryVsVitC = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Strawberry Dew Tinted Sunscreen SPF 50+ PA++++", store: "Amazon.in", price: 420 }),
+]), "INR");
+check("Strawberry vs Vitamin C + E splits", strawberryVsVitC.length === 2, `got ${strawberryVsVitC.length} groups`);
+
+const dragonVsVitC = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Dragon Fruit Bounce Sunscreen SPF 50+ PA++++", store: "Amazon.in", price: 420 }),
+]), "INR");
+check("Dragon Fruit vs Vitamin C + E splits", dragonVsVitC.length === 2, `got ${dragonVsVitC.length} groups`);
+
+const limeVsWatermelon = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Lime Rush Swim + Sports SPF 50+ PA++++ Sunscreen", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Watermelon Cooling Sunscreen SPF 50+", store: "Amazon.in", price: 420 }),
+]), "INR");
+check("Lime Rush vs Watermelon splits", limeVsWatermelon.length === 2, `got ${limeVsWatermelon.length} groups`);
+
+const noisePair = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++ No White Cast", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Water-Light, UVA/UVB & Blue Light Protection", store: "Amazon.in", price: 420 }),
+]), "INR");
+check("same product with different claim noise still merges", noisePair.length === 1 && noisePair[0].storeCount === 2, `got ${noisePair.length} groups`);
+
+const comboVsSingle = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Combo", store: "Amazon.in", price: 700 }),
+]), "INR");
+check("combo vs single splits", comboVsSingle.length === 2, `got ${comboVsSingle.length} groups`);
+
+const kitVsSingle = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Kit", store: "Amazon.in", price: 700 }),
+]), "INR");
+check("kit vs single splits", kitVsSingle.length === 2, `got ${kitVsSingle.length} groups`);
+
+const valuePackVsSingle = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Value Pack", store: "Amazon.in", price: 700 }),
+]), "INR");
+check("value pack vs single splits", valuePackVsSingle.length === 2, `got ${valuePackVsSingle.length} groups`);
+
+const duoVsSingle = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Duo", store: "Amazon.in", price: 700 }),
+]), "INR");
+check("duo vs single splits", duoVsSingle.length === 2, `got ${duoVsSingle.length} groups`);
+
+/* Guards never apply to catalog-id matching: the catalog rule is unchanged. */
+const catalogIgnoresGuards = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50", store: "Nykaa", price: 400, catalogId: "CATG" }),
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Combo", store: "Amazon.in", price: 700, catalogId: "CATG" }),
+]), "INR");
+check("catalogId match still merges even with a bundle word", catalogIgnoresGuards.length === 1, `got ${catalogIgnoresGuards.length} groups`);
+
+const catalogClaimNoise = buildGroups(dedupeOffers([
+  offer({ title: "CeraVe Moisturising Cream 50 ml", store: "Nykaa", price: 550, catalogId: "CATD" }),
+  offer({ title: "CeraVe Moisturising Cream 50 ml No White Cast Water-Light", store: "Amazon.in", price: 499, catalogId: "CATD" }),
+]), "INR");
+check("catalogId match merges despite extra claim words", catalogClaimNoise.length === 1, `got ${catalogClaimNoise.length} groups`);
+
+/* Accepted limitation: a Hindi title splits from the English title of
+ * the same product — its native-script words count as distinctive, and
+ * sameness across scripts is unverifiable. Do not "fix" by stripping
+ * non-Latin tokens: that would turn such titles into wildcard bridges
+ * that re-merge different product lines. */
+const hindiVsEnglish = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 PA+++", store: "Nykaa", price: 400 }),
+  offer({ title: "Dot & Key विटामिन C + E सुपर ब्राइट सनस्क्रीन इन-वीवो टेस्ट SPF 50+ PA++++ नए एज", store: "amazon.in", price: 499 }),
+]), "INR");
+check("Hindi title splits from the English title (accepted)", hindiVsEnglish.length === 2, `got ${hindiVsEnglish.length} groups`);
 
 /* ------------------------------ ordering ------------------------------ */
 
