@@ -1688,6 +1688,165 @@ img.bento-photo {
   background: var(--cream-2);
 }
 
+/* Clickable group cards: the whole card opens the detail view. The lift
+   matches the other card hovers (shadow + 2px rise, transform-only). */
+.group-card-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.25s ease, transform 0.15s ease;
+}
+
+.group-card-clickable:hover {
+  border-color: #cfc2a8;
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-2px);
+}
+
+.group-card-clickable:focus-visible {
+  outline: 2px solid var(--terra);
+  outline-offset: 3px;
+}
+
+.group-cta {
+  margin-top: 16px;
+  border-top: 1px dashed var(--line);
+  padding-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: var(--olive);
+}
+
+.group-cta-arrow {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  transition: transform 0.2s ease;
+}
+
+.group-card-clickable:hover .group-cta-arrow {
+  transform: translateX(4px);
+}
+
+/* --------------------------- product detail --------------------------- */
+
+.detail-back {
+  margin-bottom: 14px;
+}
+
+.detail-back-bottom {
+  margin-top: 14px;
+}
+
+.detail-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-top {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.detail-thumb {
+  width: 132px;
+  height: 132px;
+  object-fit: cover;
+  border-radius: 18px;
+  background: var(--cream-2);
+  flex: none;
+  border: 1px solid var(--line);
+}
+
+.detail-thumb-fallback {
+  width: 132px;
+  height: 132px;
+  border-radius: 18px;
+  background: var(--cream-2);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  flex: none;
+}
+
+.detail-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 3vw, 1.8rem);
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.detail-stat {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 14px;
+  background: var(--cream);
+}
+
+.detail-stat-save {
+  background: var(--lime);
+  border-color: #d3e86a;
+}
+
+.detail-stat-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.detail-stat-value {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.detail-card .store-rows {
+  margin-top: 20px;
+}
+
+.store-listed-as {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+@media (max-width: 560px) {
+  .detail-top {
+    flex-direction: column;
+  }
+
+  .detail-thumb,
+  .detail-thumb-fallback {
+    width: 96px;
+    height: 96px;
+  }
+
+  .detail-card {
+    padding: 18px;
+  }
+}
+
 /* --------------------------- states & notices --------------------------- */
 
 .notice {
@@ -2122,6 +2281,8 @@ img.bento-photo {
   .bento-tile:hover .bento-arrow,
   .cta-btn:hover,
   .btn:hover:not(:disabled),
+  .group-card-clickable:hover,
+  .group-card-clickable:hover .group-cta-arrow,
   .pop-chip:hover,
   .recent-chip:hover,
   .footer-pill:hover,
