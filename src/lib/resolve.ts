@@ -4,12 +4,13 @@
  * Tries, in order:
  *  1. SerpApi google_immersive_product by page_token (more_stores=true)
  *     — stores come back in product_results.stores. Verified live
- *     2026-11-16: every store `link` is a Google redirect URL (aclk),
- *     NOT a merchant URL, so a name-matching seller's link is resolved
- *     to its merchant destination where possible (adurl param first,
- *     else one redirect follow); when resolution fails the redirect
- *     URL itself is returned, since in the user's browser it lands on
- *     the merchant's product page.
+ *     2026-11-16: every store `link` is a RELATIVE Google redirect
+ *     path (`/goto?url=...`), NOT a merchant URL, so links are
+ *     absolutized against google.com and a name-matching seller's
+ *     link is resolved to its merchant destination where possible
+ *     (adurl param first, else one redirect follow); when resolution
+ *     fails the absolute redirect URL itself is returned, since in
+ *     the user's browser it lands on the merchant's product page.
  *     This replaced the retired google_product id route, which always
  *     answered "Google Product hasn't returned any results for this
  *     query" and burned a SerpApi credit on every call; no id-based
@@ -192,6 +193,23 @@ const REDIRECT_TIMEOUT_MS = 4_000;
 const MAX_REDIRECT_FOLLOWS = 3;
 
 /**
+ * Immersive store links come back as RELATIVE redirect paths
+ * (`/goto?url=...`) — verified live 2026-11-16. Absolutize them
+ * against Google's redirector so they are usable links; reject
+ * anything that is not an http(s) URL after absolutizing.
+ */
+function absolutizeLink(link: string): string | null {
+  if (link.startsWith("//")) return `https:${link}`;
+  if (link.startsWith("/")) return `https://www.google.com${link}`;
+  try {
+    const u = new URL(link);
+    return u.protocol === "http:" || u.protocol === "https:" ? link : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The merchant destination of a Google redirect link (e.g. an aclk
  * URL), or null. Tries the `adurl` query param first (free, no
  * network — it usually carries the destination, sometimes
@@ -279,8 +297,10 @@ async function viaSerpApiImmersive(
       const r = asRecord(item);
       if (!r) { attempt.missingFields += 1; continue; }
       const name = asString(r.name) ?? asString(r.source) ?? asString(r.store);
-      const link = asString(r.link);
-      if (!name || !link) { attempt.missingFields += 1; continue; }
+      const rawLink = asString(r.link);
+      if (!name || !rawLink) { attempt.missingFields += 1; continue; }
+      const link = absolutizeLink(rawLink);
+      if (!link) { attempt.missingFields += 1; continue; }
       if (!isMerchantUrl(link)) {
         // Google redirect link (the norm for immersive stores): only
         // consider entries whose name matches the clicked store. Prefer
