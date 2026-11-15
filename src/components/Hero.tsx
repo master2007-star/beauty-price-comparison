@@ -27,9 +27,13 @@ const QUICK: Array<{ label: string; query: string }> = [
  * Full-width photo hero, 760px, matching the artifact: glass pills on top,
  * huge white serif headline bottom-left, two glass cards on the right, and
  * the search bar straddling the bottom edge. All motion is transform-only:
- * the headline staggers in with y-transforms on mount, the glass pills and
+ * the headline staggers in with small y-rises on mount, the glass pills and
  * glass cards slide in on mount, and the photo drifts on scroll parallax.
- * Nothing ever gates visibility on opacity.
+ * Nothing ever gates visibility on opacity, and the headline lines are NOT
+ * overflow-masked: a masked rise (words starting below the mask) leaves the
+ * headline clipped mid-line in the server HTML and until hydration +
+ * animation finish, so the words rise from a small offset instead and are
+ * fully visible from first paint.
  */
 export default function Hero({ loading, onSearch }: HeroProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -38,15 +42,15 @@ export default function Hero({ loading, onSearch }: HeroProps) {
   const photoY = useTransform(scrollYProgress, [0, 1], [0, reduceMotion ? 0 : 70]);
 
   const word = {
-    hidden: { y: "110%" },
+    hidden: { y: 20 },
     show: (i: number) => ({
-      y: "0%",
+      y: 0,
       transition: { delay: 0.08 * i + 0.1, type: "spring" as const, stiffness: 90, damping: 18 },
     }),
   };
 
   const line = (words: string[], offset: number) => (
-    <span style={{ display: "block", overflow: "hidden", paddingBottom: "0.08em", marginBottom: "-0.08em" }}>
+    <span style={{ display: "block" }}>
       {words.map((w, i) => (
         <motion.span
           key={`${w}-${i}`}

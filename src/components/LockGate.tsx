@@ -54,11 +54,21 @@ function PasscodeForm({ onUnlock }: { onUnlock: () => void }) {
 }
 
 /**
- * Renders children only when the app is unlocked. Fails closed: if the lock
- * status cannot be checked, the gate stays up (the APIs enforce it too).
+ * Renders children only when the app is unlocked. The initial decision comes
+ * from the server (layout.tsx reads the session cookie + env), so first
+ * paint never waits on a client-side status fetch: with no passcode set the
+ * page renders immediately, and with a passcode set the form renders
+ * immediately. Fails closed: if a later lock check fails, the gate goes up
+ * (the APIs enforce it too), and any 401 "locked" response re-checks.
  */
-export default function LockGate({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<"checking" | "locked" | "open">("checking");
+export default function LockGate({
+  children,
+  initialLocked,
+}: {
+  children: ReactNode;
+  initialLocked: boolean;
+}) {
+  const [state, setState] = useState<"locked" | "open">(initialLocked ? "locked" : "open");
 
   const check = useCallback(async () => {
     try {
@@ -70,26 +80,10 @@ export default function LockGate({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    check();
-  }, [check]);
-
-  useEffect(() => {
     const handler = () => check();
     window.addEventListener("bp:locked", handler);
     return () => window.removeEventListener("bp:locked", handler);
   }, [check]);
-
-  if (state === "checking") {
-    return (
-      <div className="lock-screen">
-        <div className="loading-dots" aria-label="Loading">
-          <span className="dot-pulse" />
-          <span className="dot-pulse" />
-          <span className="dot-pulse" />
-        </div>
-      </div>
-    );
-  }
 
   if (state === "locked") {
     return <PasscodeForm onUnlock={() => setState("open")} />;

@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Fraunces, IBM_Plex_Mono, Inter } from "next/font/google";
 import Link from "next/link";
 import LockGate from "@/components/LockGate";
 import ProgressBar from "@/components/ProgressBar";
 import TopStatus from "@/components/TopStatus";
+import { getConfig } from "@/lib/env";
+import { isLockEnabled, isValidSession } from "@/lib/lock";
 import "./globals.css";
 
 // Editorial serif display + clean sans body + mono labels, self-hosted at
@@ -37,13 +40,24 @@ export const metadata: Metadata = {
     "Compare live Google Shopping prices for beauty products across every store. Same variant, same size — no invented prices.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Decide the lock state on the server, from the request cookie + env, so
+  // first paint already knows it: with no passcode set (the deployed case)
+  // the page shell renders in the initial HTML instead of sitting behind a
+  // blank client-side "checking" screen while a status fetch resolves.
+  // The APIs enforce the lock too, and LockGate re-checks client-side if a
+  // request ever comes back locked (session expiry). Reading cookies() opts
+  // this layout into dynamic rendering — required for a per-request gate.
+  const cfg = getConfig();
+  const cookieHeader = (await cookies()).toString();
+  const initialLocked = isLockEnabled(cfg) && !isValidSession(cookieHeader, cfg);
+
   return (
     <html lang="en" className={`${fraunces.variable} ${inter.variable} ${plexMono.variable}`}>
       <body>
         <ProgressBar />
         <TopStatus />
-        <LockGate>
+        <LockGate initialLocked={initialLocked}>
           <main>{children}</main>
         </LockGate>
         <footer className="footer">

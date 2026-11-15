@@ -84,7 +84,7 @@ export default function HomePage() {
       <Shortcuts recent={recent} onSearch={runSearch} />
       <Marquee />
 
-      <div id="results-anchor" ref={resultsRef} style={{ scrollMarginTop: 72 }}>
+      <div id="results-anchor" ref={resultsRef} style={{ scrollMarginTop: 84 }}>
         {loading ? (
           <div className="wrap">
             <div className="loading-dots" role="status" aria-label="Searching">
