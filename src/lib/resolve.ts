@@ -17,10 +17,14 @@
  *     SerpApi calls are made any more.
  *  2. SearchApi google_product_offers via product_token (up to 3 tokens) —
  *     offers carry merchant.name + link + extracted_price.
+ *  3. SearchApi google_product_page RESCUE — ONLY when both token pools
+ *     are empty and a pooled product/catalog id exists: mints a
+ *     product_token from one id (product.product_token), then runs
+ *     route 2 with it, unchanged. Never runs before the token routes.
  *
  * The client sends a group-wide pool of tokens (the clicked offer's own
  * first, then its group siblings'); identical values collapse to one
- * provider call each, and at most 3 tokens are tried per route. Both
+ * provider call each, and at most 3 tokens are tried per route. All
  * routes match on the store name ALONE against the CLICKED offer: the
  * token already establishes product identity, and Google's cached
  * seller-listed price legitimately differs from the search-result price
@@ -143,6 +147,8 @@ interface ProviderAttempt {
   redirectsResolved: number;
   /** Google-redirect entries whose name matched the clicked store. */
   nameMatchedRedirects: number;
+  /** Product tokens minted by the product-page rescue route. */
+  tokensMinted: number;
   /** First seller that passed the name gate but whose price differed. */
   priceMismatch: { name: string; sellerPrice: number } | null;
   /** First seller that passed the name gate but listed no price. */
@@ -150,7 +156,7 @@ interface ProviderAttempt {
 }
 
 function emptyAttempt(): ProviderAttempt {
-  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, entriesSeen: 0, googleRedirectLinks: 0, missingFields: 0, redirectsResolved: 0, nameMatchedRedirects: 0, priceMismatch: null, nameMatchedNoPrice: null };
+  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, entriesSeen: 0, googleRedirectLinks: 0, missingFields: 0, redirectsResolved: 0, nameMatchedRedirects: 0, tokensMinted: 0, priceMismatch: null, nameMatchedNoPrice: null };
 }
 
 function recordFailure(attempt: ProviderAttempt, detail: string) {
@@ -378,6 +384,69 @@ async function viaSearchApi(
   return { hit: null, attempt };
 }
 
+/** Fold one attempt's observations into another, so the rescue path can
+ *  attribute its minted-token offers attempt to the page route in
+ *  diagnostics. */
+function mergeAttempts(into: ProviderAttempt, from: ProviderAttempt): void {
+  into.requests += from.requests;
+  into.failedRequests += from.failedRequests;
+  for (const f of from.failures) {
+    if (!into.failures.includes(f)) into.failures.push(f);
+  }
+  into.sellersSeen += from.sellersSeen;
+  into.entriesSeen += from.entriesSeen;
+  into.googleRedirectLinks += from.googleRedirectLinks;
+  into.missingFields += from.missingFields;
+  into.redirectsResolved += from.redirectsResolved;
+  into.nameMatchedRedirects += from.nameMatchedRedirects;
+  into.tokensMinted += from.tokensMinted;
+  into.priceMismatch ??= from.priceMismatch;
+  into.nameMatchedNoPrice ??= from.nameMatchedNoPrice;
+}
+
+/**
+ * Rescue route: SearchApi's legacy google_product_page engine accepts
+ * a product_id and returns product.product_token, which feeds the
+ * offers route. This rescues groups that carry productIds but NO
+ * tokens. Runs ONLY when both token pools are empty and at least one
+ * pooled id exists — strictly after the token routes, never before
+ * them. Tries at most ONE id (the first pooled id, clicked offer's
+ * first). A minted token is handed to viaSearchApi unchanged; the
+ * offers attempt is folded into the page-route attempt so diagnostics
+ * show the whole rescue path under one label.
+ */
+async function viaSearchApiProductPage(
+  ids: string[],
+  store: string | undefined,
+  cfg: AppConfig,
+): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
+  const attempt = emptyAttempt();
+  const key = cfg.keys.searchapi;
+  if (!key) return { hit: null, attempt };
+  const id = ids[0];
+  if (!id) return { hit: null, attempt };
+  const params = new URLSearchParams({
+    engine: "google_product_page",
+    product_id: id,
+    gl: cfg.region,
+    hl: cfg.language,
+    api_key: key,
+  });
+  attempt.requests += 1;
+  const outcome = await fetchJson(`https://www.searchapi.io/api/v1/search?${params}`, {});
+  if (!outcome.json || outcome.apiError) {
+    recordFailure(attempt, failureDetail(outcome));
+    return { hit: null, attempt };
+  }
+  const product = asRecord(outcome.json.product);
+  const token = asString(product?.product_token) ?? asString(outcome.json.product_token);
+  if (!token) return { hit: null, attempt };
+  attempt.tokensMinted += 1;
+  const offers = await viaSearchApi([token], store, cfg);
+  mergeAttempts(attempt, offers.attempt);
+  return { hit: offers.hit, attempt };
+}
+
 function dedupeValues(values: (string | undefined)[]): string[] {
   return [...new Set(values.filter((v): v is string => Boolean(v)))];
 }
@@ -400,6 +469,9 @@ function attemptDetail(label: string, a: ProviderAttempt): string {
   if (a.nameMatchedRedirects > 0) {
     parts.push(`${a.nameMatchedRedirects} name-matched redirect${a.nameMatchedRedirects === 1 ? "" : "s"}`);
   }
+  if (a.tokensMinted > 0) {
+    parts.push(`${a.tokensMinted} product token${a.tokensMinted === 1 ? "" : "s"} minted`);
+  }
   if (a.missingFields > 0) {
     parts.push(`${a.missingFields} missing name/link`);
   }
@@ -411,26 +483,31 @@ function noMatchReason(
   cfg: AppConfig,
   serpAttempt: ProviderAttempt,
   searchAttempt: ProviderAttempt,
+  pageAttempt: ProviderAttempt,
 ): string {
   if (!cfg.keys.serpapi && !cfg.keys.searchapi) {
     return "No link-resolution provider key is configured (SERPAPI_KEY or SEARCHAPI_KEY).";
   }
-  const requests = serpAttempt.requests + searchAttempt.requests;
-  const failedRequests = serpAttempt.failedRequests + searchAttempt.failedRequests;
-  const sellersSeen = serpAttempt.sellersSeen + searchAttempt.sellersSeen;
+  const requests = serpAttempt.requests + searchAttempt.requests + pageAttempt.requests;
+  const failedRequests = serpAttempt.failedRequests + searchAttempt.failedRequests + pageAttempt.failedRequests;
+  const sellersSeen = serpAttempt.sellersSeen + searchAttempt.sellersSeen + pageAttempt.sellersSeen;
   const failures: string[] = [];
   if (serpAttempt.failures.length > 0) failures.push(`SerpApi: ${serpAttempt.failures.join(", ")}`);
   if (searchAttempt.failures.length > 0) failures.push(`SearchApi: ${searchAttempt.failures.join(", ")}`);
+  if (pageAttempt.failures.length > 0) failures.push(`SearchApi page route: ${pageAttempt.failures.join(", ")}`);
   const failureSuffix = failures.length > 0 ? ` Some resolution requests also failed (${failures.join("; ")}).` : "";
 
   if (requests === 0) {
-    return "No usable product token was available for the configured resolution providers.";
+    return "No usable product token or id was available for the configured resolution providers.";
   }
   if (sellersSeen === 0 && failedRequests === requests) {
     return `All link-resolution requests failed (${failures.join("; ")}).`;
   }
   if (sellersSeen === 0) {
-    const detail = attemptDetail("SerpApi", serpAttempt) + attemptDetail("SearchApi", searchAttempt);
+    const detail =
+      attemptDetail("SerpApi", serpAttempt) +
+      attemptDetail("SearchApi", searchAttempt) +
+      attemptDetail("SearchApi page route", pageAttempt);
     return `No sellers were returned for the tried product tokens.${detail}${failureSuffix}`;
   }
   if (req.store) {
@@ -445,13 +522,22 @@ export async function resolveDirectLink(
 ): Promise<ResolveLinksResponse> {
   // Clicked offer's own tokens first, then pooled group tokens; identical
   // values collapse to a single provider call each, capped at 3 tokens
-  // per route. Pooled product/catalog ids are ignored: the SerpApi
-  // google_product id route is retired and every id call fails.
+  // per route. Pooled product/catalog ids feed ONLY the SearchApi
+  // product-page rescue path, which runs solely when both token pools
+  // are empty: the SerpApi google_product id route is retired and every
+  // id call fails, so ids are never sent to SerpApi.
   const immersiveTokens = dedupeValues(req.immersiveTokens ?? []).slice(0, MAX_TOKENS);
   const tokens = dedupeValues([...(req.productTokens ?? []), req.productToken]).slice(0, MAX_TOKENS);
+  const ids = dedupeValues([
+    ...(req.productIds ?? []),
+    req.productId,
+    ...(req.catalogIds ?? []),
+    req.catalogId,
+  ]);
 
   let serpAttempt = emptyAttempt();
   let searchAttempt = emptyAttempt();
+  let pageAttempt = emptyAttempt();
   if (immersiveTokens.length > 0 && cfg.keys.serpapi) {
     const r = await viaSerpApiImmersive(immersiveTokens, req.store, cfg);
     serpAttempt = r.attempt;
@@ -462,5 +548,10 @@ export async function resolveDirectLink(
     searchAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
   }
-  return { directUrl: null, matchedStore: null, source: null, reason: noMatchReason(req, cfg, serpAttempt, searchAttempt) };
+  if (immersiveTokens.length === 0 && tokens.length === 0 && ids.length > 0 && cfg.keys.searchapi) {
+    const r = await viaSearchApiProductPage(ids, req.store, cfg);
+    pageAttempt = r.attempt;
+    if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
+  }
+  return { directUrl: null, matchedStore: null, source: null, reason: noMatchReason(req, cfg, serpAttempt, searchAttempt, pageAttempt) };
 }

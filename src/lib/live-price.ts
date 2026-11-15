@@ -9,6 +9,12 @@
  * degrades to "unavailable" for that one row — never an error for the
  * whole request — and the Google snapshot price stays on screen.
  *
+ * Amazon.in is special-cased: its PDPs carry no JSON-LD price, but
+ * the price sits in a hidden twister buybox JSON blob (verified by a
+ * research fetch 2026-11-16), with the corePrice spans as fallback,
+ * and SerpApi's amazon_product engine as a last resort. The Amazon
+ * extractor is never applied to non-Amazon hosts.
+ *
  * SSRF rules (hard): the client NEVER supplies a URL. Only a URL
  * returned by the server's own resolveDirectLink is ever fetched, and
  * only when it is a public http(s) URL. A price is only ever extracted
@@ -118,6 +124,85 @@ export function extractJsonLdPrice(html: string): JsonLdPrice | null {
   return candidates.find((c) => c.currency === "INR") ?? candidates[0];
 }
 
+/* ----------------------- Amazon price extraction ----------------------- */
+
+export interface AmazonPrice {
+  price: number;
+  currency: string | null;
+}
+
+/**
+ * The live price in an amazon.in product page, or null. Amazon PDPs
+ * carry no JSON-LD price; the price sits in a hidden twister buybox
+ * JSON blob:
+ *   <div class="... twister-plus-buying-options-price-data">
+ *     {"desktop_buybox_group_1":[{"displayPrice":"₹380.00",
+ *       "priceAmount":380.0,"currencySymbol":"₹", ...}]}
+ *   </div>
+ * (verified by a research fetch 2026-11-16). Fallback: the
+ * a-price-symbol / a-price-whole / a-price-fraction spans inside
+ * corePrice_feature_div. The `priceToPay` JSON is empty — it is not
+ * used. Amazon-only: the caller must check the host first; this
+ * extractor must never run on a non-Amazon page. Never throws.
+ */
+export function extractAmazonPrice(html: string): AmazonPrice | null {
+  // Primary: twister buybox JSON blob.
+  try {
+    const blob = /twister-plus-buying-options-price-data"[^>]*>([\s\S]*?)<\/div>/i.exec(html);
+    if (blob) {
+      const parsed: unknown = JSON.parse(blob[1].trim());
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!key.includes("_buybox_group_")) continue;
+          if (!Array.isArray(value) || value.length === 0) continue;
+          const entry = value[0];
+          const amount =
+            typeof entry === "object" && entry !== null
+              ? (entry as Record<string, unknown>).priceAmount
+              : undefined;
+          if (typeof amount === "number" && Number.isFinite(amount) && amount > 0) {
+            const symbol = (entry as Record<string, unknown>).currencySymbol;
+            return {
+              price: Math.round(amount * 100) / 100,
+              currency: symbol === "₹" ? "INR" : typeof symbol === "string" && symbol ? symbol : null,
+            };
+          }
+          // First buybox group only: a group with no usable entry falls
+          // through to the corePrice spans below.
+          break;
+        }
+      }
+    }
+  } catch {
+    // Malformed blob: fall through to the corePrice spans.
+  }
+  // Fallback: price spans inside corePrice_feature_div only.
+  try {
+    const marker = html.indexOf("corePrice_feature_div");
+    if (marker === -1) return null;
+    const section = html.slice(marker, marker + 8000);
+    const wholeMatch = /a-price-whole[^>]*>\s*([\d,]+)\s*</.exec(section);
+    if (!wholeMatch) return null;
+    const fractionMatch = /a-price-fraction[^>]*>\s*(\d+)\s*</.exec(section);
+    const whole = Number(wholeMatch[1].replace(/,/g, ""));
+    const fraction = fractionMatch ? Number(`0.${fractionMatch[1]}`) : 0;
+    const price = Math.round((whole + fraction) * 100) / 100;
+    if (!Number.isFinite(price) || price <= 0) return null;
+    let symbol: string | null = null;
+    const symbolRe = /a-price-symbol[^>]*>\s*([^<]*?)\s*</g;
+    let symbolMatch: RegExpExecArray | null;
+    while ((symbolMatch = symbolRe.exec(section)) !== null) {
+      if (symbolMatch[1]) {
+        symbol = symbolMatch[1];
+        break;
+      }
+    }
+    return { price, currency: symbol === "₹" ? "INR" : symbol };
+  } catch {
+    return null;
+  }
+}
+
 /* --------------------------- fetch guards --------------------------- */
 
 function isPrivateIp(host: string): boolean {
@@ -170,10 +255,12 @@ function isGoogleHost(url: string): boolean {
 /**
  * Fetch a store page as HTML text, capped at MAX_BODY_BYTES (JSON-LD
  * usually sits early in the document, so a capped prefix still parses).
- * Null on any failure: timeout, non-2xx, unreadable body, or a final
- * URL that is still a Google host.
+ * Returns the text plus the final URL after redirects, so callers can
+ * check which host actually served the page. Null on any failure:
+ * timeout, non-2xx, unreadable body, or a final URL that is still a
+ * Google host.
  */
-async function fetchPageText(url: string): Promise<string | null> {
+async function fetchPageText(url: string): Promise<{ html: string; finalUrl: string } | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -213,7 +300,76 @@ async function fetchPageText(url: string): Promise<string | null> {
       merged.set(c, offset);
       offset += c.byteLength;
     }
-    return new TextDecoder().decode(merged);
+    return { html: new TextDecoder().decode(merged), finalUrl: res.url };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* --------------------- SerpApi Amazon fallback --------------------- */
+
+const SERPAPI_TIMEOUT_MS = 20_000;
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+
+function asNumber(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function extractAsin(url: string): string | null {
+  const match = /\/dp\/([A-Z0-9]{10})\b/.exec(url);
+  return match ? match[1] : null;
+}
+
+/**
+ * Last-resort Amazon price via SerpApi's amazon_product engine: one
+ * call per Amazon row, only when HTML extraction found nothing. The
+ * ASIN comes from the resolved/final page URL (never from the client).
+ * Accepts the price only when the sibling `price` string carries ₹,
+ * so a wrong-currency listing is never labelled live. Null on any
+ * failure, including a missing SERPAPI_KEY.
+ */
+async function fetchAmazonProductPrice(
+  resolvedUrl: string,
+  finalUrl: string,
+  cfg: AppConfig,
+): Promise<JsonLdPrice | null> {
+  const key = cfg.keys.serpapi;
+  if (!key) return null;
+  // The resolved URL may be a Google redirect with no ASIN in it; the
+  // final URL is the PDP that was actually fetched.
+  const asin = extractAsin(finalUrl) ?? extractAsin(resolvedUrl);
+  if (!asin) return null;
+  const params = new URLSearchParams({
+    engine: "amazon_product",
+    asin,
+    amazon_domain: "amazon.in",
+    api_key: key,
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SERPAPI_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://serpapi.com/search.json?${params}`, { signal: controller.signal });
+    const text = await res.text();
+    if (!res.ok) return null;
+    const parsed: unknown = JSON.parse(text);
+    const obj = asRecord(parsed);
+    if (!obj) return null;
+    if (asString(obj.error) ?? asString(asRecord(obj.error)?.message)) return null;
+    const results = asRecord(obj.product_results);
+    const price = asNumber(results?.extracted_price);
+    const label = asString(results?.price);
+    if (price === null || price <= 0) return null;
+    if (!label || !label.includes("₹")) return null;
+    return { price: Math.round(price * 100) / 100, currency: "INR" };
   } catch {
     return null;
   } finally {
@@ -247,11 +403,30 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
     );
     const url = resolved.directUrl;
     if (!url || !isFetchableUrl(url)) return unavailable;
-    const html = await fetchPageText(url);
-    if (!html) return unavailable;
-    const found = extractJsonLdPrice(html);
-    if (!found) return unavailable;
-    return { key: item.key, status: "live", livePrice: found.price, currency: found.currency };
+    const page = await fetchPageText(url);
+    if (!page) return unavailable;
+    const found = extractJsonLdPrice(page.html);
+    if (found) return { key: item.key, status: "live", livePrice: found.price, currency: found.currency };
+    // Amazon PDPs carry no JSON-LD price: twister extraction, then the
+    // SerpApi amazon_product fallback. Host-gated on the FINAL URL —
+    // the Amazon extractor must never run on a non-Amazon page.
+    let finalHost = "";
+    try {
+      finalHost = new URL(page.finalUrl).hostname.toLowerCase();
+    } catch {
+      finalHost = "";
+    }
+    if (finalHost === "amazon.in" || finalHost.endsWith(".amazon.in")) {
+      const amazon = extractAmazonPrice(page.html);
+      if (amazon) {
+        return { key: item.key, status: "live", livePrice: amazon.price, currency: amazon.currency };
+      }
+      const viaApi = await fetchAmazonProductPrice(url, page.finalUrl, cfg);
+      if (viaApi) {
+        return { key: item.key, status: "live", livePrice: viaApi.price, currency: viaApi.currency };
+      }
+    }
+    return unavailable;
   } catch {
     return unavailable;
   }

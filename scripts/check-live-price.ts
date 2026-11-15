@@ -1,9 +1,10 @@
 /**
- * Fixture-based verification for the JSON-LD live-price extractor.
- * No network, no provider keys — pure unit-level checks over HTML strings.
+ * Fixture-based verification for the live-price extractors (JSON-LD and
+ * Amazon twister/corePrice). No network, no provider keys — pure
+ * unit-level checks over HTML strings.
  * Run: npm run check:live-price
  */
-import { extractJsonLdPrice } from "../src/lib/live-price";
+import { extractAmazonPrice, extractJsonLdPrice } from "../src/lib/live-price";
 
 let failures = 0;
 
@@ -193,6 +194,89 @@ check(
   extractJsonLdPrice(
     `<html><head><script type='application/ld+json'>{"@type":"Offer","price":175,"priceCurrency":"INR"}</script></head></html>`,
   )?.price === 175,
+);
+
+/* --------------------- Amazon twister extraction ---------------------- */
+/* Fixture blob shape verified against a real amazon.in PDP fetch
+ * 2026-11-16 (offerListingId redacted). */
+
+function amazonPage(...sections: string[]): string {
+  return `<html><body>${sections.join("")}</body></html>`;
+}
+
+const TWISTER_BLOB = `{"desktop_buybox_group_1":[{"displayPrice":"₹380.00","priceAmount":380.00,"currencySymbol":"₹","integerValue":"380","decimalSeparator":".","fractionalValue":"00","symbolPosition":"left","hasSpace":false,"showFractionalPartIfEmpty":false,"offerListingId":"REDACTED","locale":"en-IN","buyingOptionType":"NEW","aapiBuyingOptionIndex":0}]}`;
+
+function twisterDiv(json: string): string {
+  return `<div class="a-section aok-hidden twister-plus-buying-options-price-data">${json}</div>`;
+}
+
+const CORE_PRICE = `<div id="corePrice_feature_div" class="celwidget" data-feature-name="corePrice"><span class="a-price"><span class="a-price-symbol">₹</span><span class="a-price-whole">380</span><span class="a-price-decimal">.</span><span class="a-price-fraction">00</span></span></div>`;
+
+check(
+  "twister blob parses to 380.00 INR",
+  JSON.stringify(extractAmazonPrice(amazonPage(twisterDiv(TWISTER_BLOB), CORE_PRICE))) ===
+    JSON.stringify({ price: 380, currency: "INR" }),
+  JSON.stringify(extractAmazonPrice(amazonPage(twisterDiv(TWISTER_BLOB), CORE_PRICE))),
+);
+
+check(
+  "missing blob falls back to corePrice spans",
+  JSON.stringify(extractAmazonPrice(amazonPage(CORE_PRICE))) ===
+    JSON.stringify({ price: 380, currency: "INR" }),
+);
+
+check(
+  "malformed blob with no corePrice returns null without throwing",
+  (() => {
+    try {
+      return extractAmazonPrice(amazonPage(twisterDiv(`{not json`))) === null;
+    } catch {
+      return false;
+    }
+  })(),
+);
+
+check(
+  "malformed blob falls back to corePrice spans",
+  extractAmazonPrice(amazonPage(twisterDiv(`{not json`), CORE_PRICE))?.price === 380,
+);
+
+check(
+  "non-rupee symbol passes currency through",
+  JSON.stringify(
+    extractAmazonPrice(
+      amazonPage(
+        twisterDiv(
+          `{"desktop_buybox_group_1":[{"displayPrice":"$12.99","priceAmount":12.99,"currencySymbol":"$","locale":"en-US","buyingOptionType":"NEW"}]}`,
+        ),
+      ),
+    ),
+  ) === JSON.stringify({ price: 12.99, currency: "$" }),
+);
+
+check(
+  "zero priceAmount is not a price",
+  extractAmazonPrice(
+    amazonPage(
+      twisterDiv(
+        `{"desktop_buybox_group_1":[{"displayPrice":"₹0.00","priceAmount":0,"currencySymbol":"₹"}]}`,
+      ),
+    ),
+  ) === null,
+);
+
+check(
+  "no twister blob and no corePrice returns null",
+  extractAmazonPrice(amazonPage(`<div>no price here</div>`)) === null,
+);
+
+check(
+  "corePrice whole with thousands separator composes correctly",
+  extractAmazonPrice(
+    amazonPage(
+      `<div id="corePrice_feature_div"><span class="a-price"><span class="a-price-symbol">₹</span><span class="a-price-whole">1,299</span><span class="a-price-fraction">50</span></span></div>`,
+    ),
+  )?.price === 1299.5,
 );
 
 console.log(failures === 0 ? "\nAll live-price checks passed." : `\n${failures} check(s) failed.`);
