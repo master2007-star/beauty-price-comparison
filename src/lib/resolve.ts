@@ -9,15 +9,19 @@
  *
  * The client sends a group-wide pool of ids/tokens (the clicked offer's
  * own first, then its group siblings'); identical values collapse to one
- * provider call each, and at most 4 ids and 3 tokens are tried. A seller
- * only counts when the store name matches AND the price matches exactly —
- * always against the CLICKED offer's store and price. Anything else
- * returns null and the UI falls back honestly to the Google Shopping
- * product page. The no-match `reason` names the failure cause (no keys /
- * provider failures / no sellers / no name match / price mismatch)
- * without ever exposing keys, tokens or URLs. Provider failures include
- * the provider's own error message, sanitized (error/message field only,
- * 160 chars max, runs of 32+ alphanumerics redacted).
+ * provider call each, and at most 4 ids and 3 tokens are tried. The
+ * gates differ per route, always against the CLICKED offer: the id route
+ * requires the store name AND the price to match exactly (ids are
+ * fuzzier than tokens), while the token route requires the store name
+ * alone — the token already establishes product identity, and Google's
+ * cached seller-listed price legitimately differs from the
+ * search-result price (snapshots, discounts). Anything else returns
+ * null and the UI falls back honestly to the Google Shopping product
+ * page. The no-match `reason` names the failure cause per route (no
+ * keys / provider failures / no sellers / no name match / id-route
+ * price mismatch) without ever exposing keys, tokens or URLs. Provider
+ * failures include the provider's own error message, sanitized (error/
+ * message field only, 160 chars max, runs of 32+ alphanumerics redacted).
  */
 import type { AppConfig } from "./env";
 import { pricesEqual, storesMatch } from "./format";
@@ -137,10 +141,11 @@ function recordFailure(attempt: ProviderAttempt, detail: string) {
 }
 
 /**
- * The store-name + exact-price gate, unchanged in behavior: a seller only
- * counts when the name matches (when a store gate is given) and the price
- * matches exactly (when a price gate is given). Near-misses are recorded
- * on the attempt so the no-match reason can say why.
+ * The seller gate: a seller only counts when the name matches (when a
+ * store gate is given) and the price matches exactly (when a price gate
+ * is given). The id route passes both gates; the token route passes the
+ * store gate only. Near-misses are recorded on the attempt so the
+ * no-match reason can say why.
  */
 function evaluateSeller(
   name: string,
@@ -206,10 +211,15 @@ async function viaSerpApi(
   return { hit: null, attempt };
 }
 
+/**
+ * Token route: a seller matches on the store name ALONE. The token
+ * already establishes product identity, and Google's cached
+ * seller-listed price legitimately differs from the clicked offer's
+ * search-result price, so no price gate is applied here.
+ */
 async function viaSearchApi(
   tokens: string[],
   store: string | undefined,
-  price: number | undefined,
   cfg: AppConfig,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
@@ -237,7 +247,7 @@ async function viaSearchApi(
       const link = asString(r.link);
       if (!name || !link || !isMerchantUrl(link)) continue;
       const p = asNumber(r.extracted_price);
-      const hit = evaluateSeller(name, link, p, store, price, attempt);
+      const hit = evaluateSeller(name, link, p, store, undefined, attempt);
       if (hit) return { hit, attempt };
     }
   }
@@ -274,11 +284,15 @@ function noMatchReason(
   if (sellersSeen === 0) {
     return `No sellers were returned for the tried product ids/tokens.${failureSuffix}`;
   }
-  const mismatch = serpAttempt.priceMismatch ?? searchAttempt.priceMismatch;
+  // Price near-misses can only come from the id route: the token route
+  // matches on name alone, so a token-route name match is a success and
+  // never reaches this reason. The price-mismatch strings below therefore
+  // describe the id route's outcome only.
+  const mismatch = serpAttempt.priceMismatch;
   if (mismatch && req.price !== undefined) {
     return `Store "${mismatch.name}" matched by name but its listed price (${mismatch.sellerPrice.toFixed(2)}) differs from the clicked offer's price (${req.price.toFixed(2)}).${failureSuffix}`;
   }
-  const noPrice = serpAttempt.nameMatchedNoPrice ?? searchAttempt.nameMatchedNoPrice;
+  const noPrice = serpAttempt.nameMatchedNoPrice;
   if (noPrice && req.price !== undefined) {
     return `Store "${noPrice}" matched by name but listed no price to compare with the clicked offer's price (${req.price.toFixed(2)}).${failureSuffix}`;
   }
@@ -305,7 +319,7 @@ export async function resolveDirectLink(
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "serpapi" satisfies ProviderId };
   }
   if (tokens.length > 0 && cfg.keys.searchapi) {
-    const r = await viaSearchApi(tokens, req.store, req.price, cfg);
+    const r = await viaSearchApi(tokens, req.store, cfg);
     searchAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
   }
