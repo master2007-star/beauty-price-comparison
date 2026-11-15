@@ -1,10 +1,14 @@
 import type {
+  AskRequest,
+  AskResponse,
+  ChatTurn,
   CompareResponse,
   RefreshPricesRequest,
   RefreshPricesResponse,
   ResolveLinksRequest,
   ResolveLinksResponse,
   SearchResponse,
+  SmartSearchResponse,
   StatusResponse,
 } from "@/lib/types";
 
@@ -39,6 +43,14 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
 
 export function searchProducts(query: string): Promise<SearchResponse> {
   return postJson<SearchResponse>("/api/search", { query });
+}
+
+export function askAi(message: string, history: ChatTurn[]): Promise<AskResponse> {
+  return postJson<AskResponse>("/api/ask", { message, history } satisfies AskRequest);
+}
+
+export function smartRewrite(query: string): Promise<SmartSearchResponse> {
+  return postJson<SmartSearchResponse>("/api/smart-search", { query });
 }
 
 export function compareQueries(queries: string[]): Promise<CompareResponse> {

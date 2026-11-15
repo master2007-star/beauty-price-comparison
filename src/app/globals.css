@@ -2545,6 +2545,241 @@ img.bento-photo {
   color: var(--ink-faint);
 }
 
+/* ------------------------- AI advisor + smart ------------------------- */
+/* Optional Gemini features. Nothing here renders unless GEMINI_API_KEY
+   is set — the components return null / hide the toggle otherwise. */
+
+.smart-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  background: var(--cream);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.smart-chip:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
+.smart-chip.is-on {
+  background: var(--lime);
+  border-color: #d3e86a;
+  color: var(--ink);
+}
+
+.smart-note {
+  margin: 8px 4px 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.ai-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  border: none;
+  border-radius: 999px;
+  padding: 13px 22px;
+  font-weight: 650;
+  font-size: 0.95rem;
+  background: var(--olive);
+  color: var(--light);
+  box-shadow: var(--shadow);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.ai-fab:hover {
+  background: var(--olive-deep);
+  transform: translateY(-1px);
+}
+
+.ai-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  width: min(400px, calc(100vw - 32px));
+  height: min(560px, calc(100dvh - 32px));
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.ai-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ai-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ai-sub {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.ai-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 92%;
+}
+
+.ai-msg.is-user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.ai-msg.is-ai {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.ai-bubble {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 18px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-msg.is-user .ai-bubble {
+  background: var(--olive);
+  color: var(--light);
+  border-bottom-right-radius: 6px;
+}
+
+.ai-msg.is-ai .ai-bubble {
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+
+.ai-thinking {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.ai-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.ai-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.ai-card-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ai-card-meta {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.ai-see-results {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.ai-retry {
+  align-self: center;
+}
+
+.ai-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.ai-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  padding: 10px 14px;
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.ai-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(227, 105, 65, 0.35);
+}
+
+@media (max-width: 520px) {
+  .smart-chip-label {
+    display: none;
+  }
+  .smart-chip {
+    padding: 8px 10px;
+  }
+  .ai-fab {
+    right: 14px;
+    bottom: 14px;
+  }
+  .ai-panel {
+    right: 8px;
+    bottom: 8px;
+    width: calc(100vw - 16px);
+    height: min(560px, calc(100dvh - 16px));
+  }
+}
+
 /* ------------------------- reduced motion ------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -2570,6 +2805,7 @@ img.bento-photo {
   .bento-tile:hover .bento-arrow,
   .cta-btn:hover,
   .btn:hover:not(:disabled),
+  .ai-fab:hover,
   .group-card-clickable:hover,
   .group-card-clickable:hover .group-cta-arrow,
   .pop-chip:hover,

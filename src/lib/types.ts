@@ -181,5 +181,39 @@ export interface StatusResponse {
   region: string;
   language: string;
   passcodeSet: boolean;
+  /** True when GEMINI_API_KEY is set, i.e. the AI advisor + smart search are available. */
+  geminiConfigured: boolean;
   providers: Record<ProviderId, { configured: boolean; last4: string | null }>;
+}
+
+/** One turn of an AI advisor conversation. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AskRequest {
+  message: string;
+  history?: ChatTurn[];
+}
+
+export interface AskResponse {
+  status: "ok" | "error" | "not_configured";
+  /** The assistant's answer, when status is "ok". */
+  answer?: string;
+  /** The product query that was searched, or null for a general answer. */
+  searchQuery?: string | null;
+  /** Real ProductGroups from runSearch, same shape as /api/search. */
+  groups?: ProductGroup[];
+  /** Short plain message when status is "error". */
+  message?: string;
+}
+
+export interface SmartSearchRequest {
+  query: string;
+}
+
+export interface SmartSearchResponse {
+  status: "ok" | "error" | "not_configured";
+  rewrittenQuery?: string;
 }

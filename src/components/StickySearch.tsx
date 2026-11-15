@@ -7,10 +7,12 @@ import SearchForm from "./SearchForm";
 interface StickySearchProps {
   loading: boolean;
   onSearch: (query: string) => void;
+  /** True when Gemini is configured — shows the Smart toggle in the search pill. */
+  smartEnabled?: boolean;
 }
 
 /** Compact search bar that slides in (y-transform) once the hero is passed. */
-export default function StickySearch({ loading, onSearch }: StickySearchProps) {
+export default function StickySearch({ loading, onSearch, smartEnabled = false }: StickySearchProps) {
   const [visible, setVisible] = useState(false);
   const { scrollY } = useScroll();
 
@@ -33,7 +35,7 @@ export default function StickySearch({ loading, onSearch }: StickySearchProps) {
               Price<span className="brand-dot">.</span>
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <SearchForm loading={loading} onSearch={onSearch} inputId="sticky-search" compact />
+              <SearchForm loading={loading} onSearch={onSearch} inputId="sticky-search" compact smartEnabled={smartEnabled} />
             </div>
           </div>
         </motion.div>

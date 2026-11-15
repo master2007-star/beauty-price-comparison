@@ -8,6 +8,10 @@ import SearchForm from "./SearchForm";
 interface HeroProps {
   loading: boolean;
   onSearch: (query: string) => void;
+  /** True when Gemini is configured — shows the Smart toggle in the search pill. */
+  smartEnabled?: boolean;
+  /** External value sync for the hero search box (AI chat handoff). */
+  searchBoxSync?: { value: string; nonce: number };
 }
 
 const HEADLINE: string[][] = [
@@ -70,7 +74,7 @@ function Float({
  * the float never fights the mount slide-in), and the glass cards get a
  * shine sweep on hover (a decorative band parked out of view at rest).
  */
-export default function Hero({ loading, onSearch }: HeroProps) {
+export default function Hero({ loading, onSearch, smartEnabled = false, searchBoxSync }: HeroProps) {
   const ref = useRef<HTMLDivElement>(null);
   const reduceMotion = useReducedMotion();
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
@@ -222,6 +226,8 @@ export default function Hero({ loading, onSearch }: HeroProps) {
               onSearch={onSearch}
               inputId="hero-search"
               placeholder={'Try "The Ordinary Niacinamide 10%"…'}
+              smartEnabled={smartEnabled}
+              externalValue={searchBoxSync}
             />
           </div>
         </div>

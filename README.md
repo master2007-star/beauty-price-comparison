@@ -54,6 +54,8 @@ under Project → Settings → Environment Variables.
 | `AUTH_GOOGLE_ID` | No | Optional Google login: OAuth client ID (see below) |
 | `AUTH_GOOGLE_SECRET` | No | Optional Google login: OAuth client secret (see below) |
 | `AUTH_SECRET` | No | Optional Google login: random string for signing session cookies |
+| `GEMINI_API_KEY` | No | Optional Gemini AI: API key (see below) |
+| `GEMINI_MODEL` | No (default `gemini-2.5-flash-lite`) | Optional Gemini AI: model id override |
 
 ## Google login (optional)
 
@@ -83,6 +85,45 @@ Setup (the person deploying does this; no credentials live in the code):
 For local development, the same three variables go in `.env.local`, and
 the redirect URI registered in Google Cloud Console must be
 `http://localhost:3000/api/auth/callback/google` instead.
+
+## Gemini AI (optional)
+
+Two AI features, both powered by Google's Gemini API through plain REST
+calls from API routes — the key never leaves the server, and no AI code
+runs in the browser:
+
+- **AI beauty advisor** — a floating "✦ Ask AI" chat. It classifies each
+  message, and when a product is wanted it runs the normal search
+  pipeline (`runSearch`, so the beauty guard and filter apply) and
+  answers grounded on those real results only, with mini-cards and a
+  "See these results" handoff to the main search.
+- **Smart search** — a "✦ Smart" toggle next to the search button. When
+  on, natural-language queries ("a cheap vitamin C serum for oily skin")
+  are rewritten into precise product queries before the normal search
+  runs. Any AI failure falls back silently to the raw query.
+
+Grounding rules (encoded in the prompts in `src/lib/gemini.ts`): the
+model may only discuss products and prices from a real search result
+passed to it — it must never invent a product, a store, or a price, and
+must say plainly when no results were found. General skincare context is
+framed as general information only, never as medical advice or a
+diagnosis.
+
+Without `GEMINI_API_KEY`, no AI button, toggle, or panel renders
+anywhere, the `/api/ask` and `/api/smart-search` routes answer with a
+short "not configured" status, and the app behaves exactly as before.
+
+Setup (the person deploying does this; no credentials live in the code):
+
+1. Go to [Google AI Studio](https://aistudio.google.com/) and click
+   **Get API key** (a free key is enough to start).
+2. In Vercel → Project → Settings → Environment Variables, set:
+   - `GEMINI_API_KEY` = the API key
+   - `GEMINI_MODEL` = optional model override (default
+     `gemini-2.5-flash-lite`)
+3. Redeploy. The "✦ Ask AI" button and "✦ Smart" toggle appear.
+
+For local development, the same variables go in `.env.local`.
 
 ## Local development
 

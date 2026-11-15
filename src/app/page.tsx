@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import AiChat from "@/components/AiChat";
 import CompareModal from "@/components/CompareModal";
 import Hero from "@/components/Hero";
 import Marquee from "@/components/Marquee";
@@ -16,7 +17,7 @@ import {
 } from "@/components/Sections";
 import Shortcuts from "@/components/Shortcuts";
 import StickySearch from "@/components/StickySearch";
-import { LockedError, searchProducts } from "@/lib/client-api";
+import { fetchStatus, LockedError, searchProducts } from "@/lib/client-api";
 import type { SearchResponse } from "@/lib/types";
 
 const RECENT_KEY = "bp:recent-searches";
@@ -43,9 +44,18 @@ export default function HomePage() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
   const resultsRef = useRef<HTMLDivElement>(null);
+  // Gemini availability, from the existing /api/status response — one
+  // fetch shared by the chat button and both Smart toggles. Defaults to
+  // false, so with no key nothing AI-related ever renders.
+  const [geminiConfigured, setGeminiConfigured] = useState(false);
+  // Sync signal for the hero search box (AI chat "See these results").
+  const [heroSync, setHeroSync] = useState<{ value: string; nonce: number } | undefined>(undefined);
 
   useEffect(() => {
     setRecent(loadRecent());
+    fetchStatus()
+      .then((s) => setGeminiConfigured(s.geminiConfigured === true))
+      .catch(() => setGeminiConfigured(false));
   }, []);
 
   const runSearch = useCallback(async (query: string) => {
@@ -77,10 +87,20 @@ export default function HomePage() {
     }
   }, []);
 
+  // AI chat handoff: put the chat's query in the hero search box and run
+  // the normal search for it.
+  const showChatResults = useCallback(
+    (query: string) => {
+      setHeroSync((prev) => ({ value: query, nonce: (prev?.nonce ?? 0) + 1 }));
+      void runSearch(query);
+    },
+    [runSearch],
+  );
+
   return (
     <>
-      <StickySearch loading={loading} onSearch={runSearch} />
-      <Hero loading={loading} onSearch={runSearch} />
+      <StickySearch loading={loading} onSearch={runSearch} smartEnabled={geminiConfigured} />
+      <Hero loading={loading} onSearch={runSearch} smartEnabled={geminiConfigured} searchBoxSync={heroSync} />
       <Shortcuts recent={recent} onSearch={runSearch} />
       <Marquee />
 
@@ -154,6 +174,8 @@ export default function HomePage() {
         initialQueries={results ? [results.query] : []}
         onClose={() => setCompareOpen(false)}
       />
+
+      <AiChat geminiConfigured={geminiConfigured} onShowResults={showChatResults} />
     </>
   );
 }
