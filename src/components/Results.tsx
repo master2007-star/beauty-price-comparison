@@ -87,6 +87,11 @@ function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer
       pool.productTokens.length > 0 ||
       pool.immersiveTokens.length > 0;
     if (!offer.productUrl && !hasIdentity) return;
+    // Open the tab synchronously inside the click gesture: opening it
+    // after the awaited resolve gets blocked as a pop-up (notably by
+    // Android Chrome). The tab is navigated once the link is known, or
+    // closed when there is nothing to open.
+    const tab = window.open("", "_blank", "noopener,noreferrer");
     setState("checking");
     try {
       const res = await resolveLinks({
@@ -103,14 +108,20 @@ function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer
       if (res.directUrl) {
         setDirect(res.directUrl);
         setState("idle");
-        window.open(res.directUrl, "_blank", "noopener,noreferrer");
+        if (tab) tab.location.href = res.directUrl;
+        else window.open(res.directUrl, "_blank", "noopener,noreferrer");
         return;
       }
     } catch {
       // Fall through to the Google Shopping page below.
     }
     setState("fallback");
-    if (offer.productUrl) window.open(offer.productUrl, "_blank", "noopener,noreferrer");
+    if (offer.productUrl) {
+      if (tab) tab.location.href = offer.productUrl;
+      else window.open(offer.productUrl, "_blank", "noopener,noreferrer");
+    } else if (tab) {
+      tab.close();
+    }
   }
 
   const label = direct ? "Go to Store" : state === "checking" ? "Checking link…" : state === "fallback" ? "Via Google Shopping" : "Go to Store";
