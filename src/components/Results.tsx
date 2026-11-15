@@ -54,7 +54,23 @@ function ProductThumb({
   );
 }
 
-function StoreButton({ offer }: { offer: Offer }) {
+/** Identity pool for link resolution: the clicked offer's own ids/tokens
+ *  first, then every sibling offer's ids/tokens from the same group (the
+ *  group is one Google product, so a sibling SearchApi token can resolve
+ *  a Serper offer's link). The store + price gate still uses the clicked
+ *  offer only — never a sibling's. */
+function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
+  const ordered = groupOffers ? [offer, ...groupOffers] : [offer];
+  const uniq = (pick: (o: Offer) => string | null) =>
+    [...new Set(ordered.map(pick).filter((v): v is string => Boolean(v)))];
+  return {
+    productIds: uniq((o) => o.productId),
+    catalogIds: uniq((o) => o.catalogId),
+    productTokens: uniq((o) => o.productToken),
+  };
+}
+
+function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer[] }) {
   const [state, setState] = useState<"idle" | "checking" | "fallback">("idle");
   const [direct, setDirect] = useState<string | null>(offer.directUrl);
 
@@ -63,13 +79,18 @@ function StoreButton({ offer }: { offer: Offer }) {
       window.open(direct, "_blank", "noopener,noreferrer");
       return;
     }
-    if (!offer.productUrl && !offer.productId && !offer.catalogId && !offer.productToken) return;
+    const pool = pooledIdentities(offer, groupOffers);
+    const hasIdentity = pool.productIds.length > 0 || pool.catalogIds.length > 0 || pool.productTokens.length > 0;
+    if (!offer.productUrl && !hasIdentity) return;
     setState("checking");
     try {
       const res = await resolveLinks({
         productId: offer.productId ?? undefined,
         catalogId: offer.catalogId ?? undefined,
+        productIds: pool.productIds,
+        catalogIds: pool.catalogIds,
         productToken: offer.productToken ?? undefined,
+        productTokens: pool.productTokens,
         store: offer.store,
         price: offer.price,
       });
@@ -114,7 +135,7 @@ function StoreRows({ group, showTitles = false }: { group: ProductGroup; showTit
           {offer.isCheapest ? <span className="flag-cheapest">Lowest</span> : null}
           <span className="store-price">{offer.priceLabel}</span>
           {offer.deltaLabel ? <span className="delta">{offer.deltaLabel}</span> : null}
-          <StoreButton offer={offer} />
+          <StoreButton offer={offer} groupOffers={group.offers} />
           {showTitles && offer.title !== group.title ? (
             <span className="store-listed-as">Listed as “{offer.title}”</span>
           ) : null}
@@ -363,7 +384,14 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
             ) : (
               <motion.div layout>
                 <AnimatePresence initial={false}>
-                  {results.offers.map((offer, i) => (
+                  {results.offers.map((offer, i) => {
+                    // Flat offers are copies of the grouped ones (JSON
+                    // round-trip), so match the enclosing group by value
+                    // to pool its ids/tokens for link resolution.
+                    const group = results.groups.find((g) =>
+                      g.offers.some((o) => o.store === offer.store && o.title === offer.title && o.price === offer.price),
+                    );
+                    return (
                     <motion.div
                       className="offer-row"
                       key={`${offer.store}-${offer.title}-${offer.price}-${i}`}
@@ -387,9 +415,10 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
                         </div>
                       </div>
                       <span className="store-price">{offer.priceLabel}</span>
-                      <StoreButton offer={offer} />
+                      <StoreButton offer={offer} groupOffers={group?.offers} />
                     </motion.div>
-                  ))}
+                    );
+                  })}
                 </AnimatePresence>
               </motion.div>
             )}

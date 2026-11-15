@@ -116,6 +116,9 @@ export interface CompareResponse {
 export interface ResolveLinksRequest {
   productId?: string;
   catalogId?: string;
+  /** Pooled ids from the enclosing group, clicked offer's ids first. */
+  productIds?: string[];
+  catalogIds?: string[];
   productToken?: string;
   productTokens?: string[];
   store?: string;
