@@ -15,7 +15,9 @@
  * returns null and the UI falls back honestly to the Google Shopping
  * product page. The no-match `reason` names the failure cause (no keys /
  * provider failures / no sellers / no name match / price mismatch)
- * without ever exposing keys, tokens or URLs.
+ * without ever exposing keys, tokens or URLs. Provider failures include
+ * the provider's own error message, sanitized (error/message field only,
+ * 160 chars max, runs of 32+ alphanumerics redacted).
  */
 import type { AppConfig } from "./env";
 import { pricesEqual, storesMatch } from "./format";
@@ -50,6 +52,21 @@ interface FetchOutcome {
   json: Json | null;
   /** True when the provider answered HTTP 200 with an error payload. */
   apiError: boolean;
+  /** The provider's own error message, sanitized (see providerErrorMessage), or null when none was readable. */
+  errorMessage: string | null;
+}
+
+/**
+ * The provider's error text, sanitized for diagnostics: only the
+ * `error`/`message` string field is ever taken, truncated to 160 chars,
+ * with any run of 32+ alphanumeric characters redacted so no key or
+ * token can leak. URLs, request params and raw bodies are never included.
+ */
+function providerErrorMessage(obj: Json): string | null {
+  const direct =
+    asString(obj.error) ?? asString(asRecord(obj.error)?.message) ?? asString(obj.message);
+  if (!direct) return null;
+  return direct.replace(/[A-Za-z0-9]{32,}/g, "[redacted]").slice(0, 160);
 }
 
 async function fetchJson(url: string, init: RequestInit): Promise<FetchOutcome> {
@@ -57,23 +74,27 @@ async function fetchJson(url: string, init: RequestInit): Promise<FetchOutcome> 
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
-    if (!res.ok) return { status: res.status, json: null, apiError: false };
     const parsed: unknown = await res.json().catch(() => null);
     const obj = asRecord(parsed);
-    if (!obj) return { status: res.status, json: null, apiError: false };
+    if (!res.ok) {
+      // Non-2xx: still read a JSON error body for its message, if any.
+      return { status: res.status, json: null, apiError: false, errorMessage: obj ? providerErrorMessage(obj) : null };
+    }
+    if (!obj) return { status: res.status, json: null, apiError: false, errorMessage: null };
     const apiError = Boolean(asString(obj.error) ?? asString(asRecord(obj.error)?.message));
-    return { status: res.status, json: obj, apiError };
+    return { status: res.status, json: obj, apiError, errorMessage: providerErrorMessage(obj) };
   } catch {
-    return { status: null, json: null, apiError: false };
+    return { status: null, json: null, apiError: false, errorMessage: null };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Failure classification for diagnostics: status only, never keys or URLs. */
+/** Failure classification for diagnostics: status plus the provider's own sanitized error message, never keys, tokens or URLs. */
 function failureDetail(outcome: FetchOutcome): string {
-  if (outcome.apiError) return "API error";
-  if (outcome.status !== null) return `HTTP ${outcome.status}`;
+  const quoted = outcome.errorMessage ? `: "${outcome.errorMessage}"` : "";
+  if (outcome.apiError) return `API error${quoted}`;
+  if (outcome.status !== null) return `HTTP ${outcome.status}${quoted}`;
   return "network/timeout";
 }
 
