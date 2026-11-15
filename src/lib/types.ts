@@ -26,6 +26,8 @@ export interface RawOffer {
   catalogId: string | null;
   productId: string | null;
   productToken: string | null;
+  /** SerpApi immersive_product_page_token: the page_token for the google_immersive_product engine. */
+  immersiveToken: string | null;
 }
 
 /** A priced offer as returned to the client. */
@@ -44,6 +46,8 @@ export interface Offer {
   catalogId: string | null;
   productId: string | null;
   productToken: string | null;
+  /** SerpApi immersive_product_page_token: the page_token for the google_immersive_product engine. */
+  immersiveToken: string | null;
   /** True when this is the cheapest offer in its group. */
   isCheapest?: boolean;
   /** "+₹X vs lowest" for non-cheapest offers, null for the cheapest. */
@@ -121,6 +125,8 @@ export interface ResolveLinksRequest {
   catalogIds?: string[];
   productToken?: string;
   productTokens?: string[];
+  /** Pooled SerpApi immersive_product_page_token values from the enclosing group, clicked offer's first. */
+  immersiveTokens?: string[];
   store?: string;
   price?: number;
 }

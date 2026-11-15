@@ -56,9 +56,9 @@ function ProductThumb({
 
 /** Identity pool for link resolution: the clicked offer's own ids/tokens
  *  first, then every sibling offer's ids/tokens from the same group (the
- *  group is one Google product, so a sibling SearchApi token can resolve
- *  a Serper offer's link). The store + price gate still uses the clicked
- *  offer only — never a sibling's. */
+ *  group is one Google product, so a sibling SearchApi token or SerpApi
+ *  immersive token can resolve a Serper offer's link). The store + price
+ *  gate still uses the clicked offer only — never a sibling's. */
 function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
   const ordered = groupOffers ? [offer, ...groupOffers] : [offer];
   const uniq = (pick: (o: Offer) => string | null) =>
@@ -67,6 +67,7 @@ function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
     productIds: uniq((o) => o.productId),
     catalogIds: uniq((o) => o.catalogId),
     productTokens: uniq((o) => o.productToken),
+    immersiveTokens: uniq((o) => o.immersiveToken),
   };
 }
 
@@ -80,7 +81,11 @@ function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer
       return;
     }
     const pool = pooledIdentities(offer, groupOffers);
-    const hasIdentity = pool.productIds.length > 0 || pool.catalogIds.length > 0 || pool.productTokens.length > 0;
+    const hasIdentity =
+      pool.productIds.length > 0 ||
+      pool.catalogIds.length > 0 ||
+      pool.productTokens.length > 0 ||
+      pool.immersiveTokens.length > 0;
     if (!offer.productUrl && !hasIdentity) return;
     setState("checking");
     try {
@@ -91,6 +96,7 @@ function StoreButton({ offer, groupOffers }: { offer: Offer; groupOffers?: Offer
         catalogIds: pool.catalogIds,
         productToken: offer.productToken ?? undefined,
         productTokens: pool.productTokens,
+        immersiveTokens: pool.immersiveTokens,
         store: offer.store,
         price: offer.price,
       });

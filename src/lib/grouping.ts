@@ -493,6 +493,7 @@ function toOffer(raw: RawOffer, currency: string): Offer | null {
     catalogId: raw.catalogId,
     productId: raw.productId,
     productToken: raw.productToken,
+    immersiveToken: raw.immersiveToken,
   };
 }
 

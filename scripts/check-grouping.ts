@@ -30,6 +30,7 @@ function offer(partial: Partial<RawOffer> & { title: string; store: string; pric
     catalogId: null,
     productId: null,
     productToken: null,
+    immersiveToken: null,
     ...partial,
   };
 }

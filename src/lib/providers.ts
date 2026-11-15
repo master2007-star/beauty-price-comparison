@@ -116,6 +116,28 @@ export function catalogIdFromProductToken(token: string | null): string | null {
 }
 
 /**
+ * Pull the immersive page token out of a `serpapi_immersive_product_api`
+ * URL (its `page_token` query param) when the shopping result carries no
+ * `immersive_product_page_token` field of its own.
+ */
+function immersiveTokenFromApiUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const token = new URL(url).searchParams.get("page_token");
+    if (token) return token;
+  } catch {
+    // Fall through to the regex below.
+  }
+  const m = /[?&]page_token=([^&]+)/.exec(url);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+/**
  * Merchant-URL check, mirroring the host check in resolve.ts: returns the
  * raw value unchanged when it is an absolute http(s) URL whose host is
  * not a Google host, and null otherwise. A host counts as Google when it
@@ -152,6 +174,7 @@ function baseOffer(provider: ProviderId): RawOffer {
     catalogId: null,
     productId: null,
     productToken: null,
+    immersiveToken: null,
   };
 }
 
@@ -198,6 +221,15 @@ export async function fetchSerpApi(query: string, cfg: AppConfig): Promise<RawOf
     offer.reviews = asNumber(r.reviews);
     offer.productId = asString(r.product_id);
     offer.catalogId = catalogIdFromUrl(productUrl);
+    // The immersive page token is the page_token for SerpApi's
+    // google_immersive_product engine (the replacement for the retired
+    // google_product engine): it is what lets resolve-links fetch the
+    // product's stores with merchant links. Fall back to the token
+    // embedded in the serpapi_immersive_product_api URL when the field
+    // itself is absent.
+    offer.immersiveToken =
+      asString(r.immersive_product_page_token) ??
+      immersiveTokenFromApiUrl(asString(r.serpapi_immersive_product_api));
     offers.push(offer);
   }
   return offers;

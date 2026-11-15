@@ -17,11 +17,13 @@ It has no dependency on any other codebase.
   brand + strong title overlap + same variant signature. Anything unsure splits
   into its own group. Sizes are strict with unit normalisation
   (16 fl oz = 473 ml).
-- **Direct links** — `POST /api/resolve-links` tries SerpApi's `google_product`
-  engine (by product/catalog id) and SearchApi's `google_product_offers` engine
-  (via `product_token`, up to 3 tokens). A seller only counts when the store
-  name **and** the exact price both match; otherwise the UI falls back honestly
-  to the Google Shopping product page and says so.
+- **Direct links** — `POST /api/resolve-links` tries SerpApi's
+  `google_immersive_product` engine (by `immersive_product_page_token`,
+  up to 3 tokens) and SearchApi's `google_product_offers` engine (via
+  `product_token`, up to 3 tokens). A seller only counts when the store
+  name matches; otherwise the UI falls back honestly to the Google
+  Shopping product page and says so. (The old SerpApi `google_product`
+  id route is retired and is never called.)
 - **Deep compare** — `POST /api/compare` runs up to 3 queries and aligns
   products across them (catalog-anchored, size-strict).
 - **Status** — `GET /api/status` reports region, language, lock state and per
@@ -83,8 +85,9 @@ Request/response formats follow each provider's published documentation
 (checked November 2026):
 
 - **SerpApi** — `GET serpapi.com/search?engine=google_shopping` reads
-  `shopping_results[]`; `engine=google_product&product_id=…&offers=true` reads
-  `sellers_results.online_sellers[]`.
+  `shopping_results[]` (capturing each result's
+  `immersive_product_page_token`); `engine=google_immersive_product&
+  page_token=…&more_stores=true` reads `product_results.stores[]`.
 - **SearchApi.io** — `GET searchapi.io/api/v1/search?engine=google_shopping`
   reads `shopping_results[]` (plus `shopping_ads[]`); `engine=google_product_offers`
   requires a `product_token` minted by the shopping call (since their May 2026

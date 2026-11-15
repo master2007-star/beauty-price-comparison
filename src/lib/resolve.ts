@@ -2,33 +2,34 @@
  * Direct store-link resolution.
  *
  * Tries, in order:
- *  1. SerpApi google_product by product/catalog id (offers=true) — sellers
- *     come back in sellers_results.online_sellers.
+ *  1. SerpApi google_immersive_product by page_token (more_stores=true)
+ *     — stores come back in product_results.stores with merchant links.
+ *     This replaced the retired google_product id route, which always
+ *     answered "Google Product hasn't returned any results for this
+ *     query" and burned a SerpApi credit on every call; no id-based
+ *     SerpApi calls are made any more.
  *  2. SearchApi google_product_offers via product_token (up to 3 tokens) —
  *     offers carry merchant.name + link + extracted_price.
  *
- * The client sends a group-wide pool of ids/tokens (the clicked offer's
- * own first, then its group siblings'); identical values collapse to one
- * provider call each, and at most 4 ids and 3 tokens are tried. The
- * gates differ per route, always against the CLICKED offer: the id route
- * requires the store name AND the price to match exactly (ids are
- * fuzzier than tokens), while the token route requires the store name
- * alone — the token already establishes product identity, and Google's
- * cached seller-listed price legitimately differs from the
- * search-result price (snapshots, discounts). Anything else returns
- * null and the UI falls back honestly to the Google Shopping product
- * page. The no-match `reason` names the failure cause per route (no
- * keys / provider failures / no sellers / no name match / id-route
- * price mismatch) without ever exposing keys, tokens or URLs. Provider
- * failures include the provider's own error message, sanitized (error/
- * message field only, 160 chars max, runs of 32+ alphanumerics redacted).
+ * The client sends a group-wide pool of tokens (the clicked offer's own
+ * first, then its group siblings'); identical values collapse to one
+ * provider call each, and at most 3 tokens are tried per route. Both
+ * routes match on the store name ALONE against the CLICKED offer: the
+ * token already establishes product identity, and Google's cached
+ * seller-listed price legitimately differs from the search-result price
+ * (snapshots, discounts). Anything else returns null and the UI falls
+ * back honestly to the Google Shopping product page. The no-match
+ * `reason` names the failure cause per route (no keys / provider
+ * failures / no sellers / no name match) without ever exposing keys,
+ * tokens or URLs. Provider failures include the provider's own error
+ * message, sanitized (error/message field only, 160 chars max, runs of
+ * 32+ alphanumerics redacted).
  */
 import type { AppConfig } from "./env";
 import { pricesEqual, storesMatch } from "./format";
 import type { ProviderId, ResolveLinksRequest, ResolveLinksResponse } from "./types";
 
 const FETCH_TIMEOUT_MS = 15_000;
-const MAX_IDS = 4;
 const MAX_TOKENS = 3;
 
 type Json = Record<string, unknown>;
@@ -143,9 +144,10 @@ function recordFailure(attempt: ProviderAttempt, detail: string) {
 /**
  * The seller gate: a seller only counts when the name matches (when a
  * store gate is given) and the price matches exactly (when a price gate
- * is given). The id route passes both gates; the token route passes the
- * store gate only. Near-misses are recorded on the attempt so the
- * no-match reason can say why.
+ * is given). Both current routes pass the store gate only — the token
+ * already establishes product identity. The optional price gate is kept
+ * for the shared gate: near-misses are recorded on the attempt so a
+ * future gated route's no-match reason can say why.
  */
 function evaluateSeller(
   name: string,
@@ -170,20 +172,33 @@ function evaluateSeller(
   return { name, link, price };
 }
 
-async function viaSerpApi(
-  ids: string[],
+/**
+ * Immersive route: SerpApi's google_immersive_product engine, the
+ * replacement for the retired google_product engine. The page_token is
+ * the shopping result's immersive_product_page_token (captured at search
+ * time). Per SerpApi's docs, stores come back in
+ * product_results.stores[] with `name`, `link` (the product purchase
+ * URL) and `extracted_price`; more_stores=true returns up to 13 stores
+ * instead of the default 3–5. Parsing is defensive: any top-level
+ * `stores`/`sellers` array is accepted as a fallback, and the store
+ * name is read from `name`/`source`/`store`. A seller matches on the
+ * store name ALONE — same reasoning as the SearchApi token route: the
+ * token already establishes product identity, and the seller-listed
+ * price legitimately differs from the clicked offer's snapshot.
+ */
+async function viaSerpApiImmersive(
+  tokens: string[],
   store: string | undefined,
-  price: number | undefined,
   cfg: AppConfig,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
   const key = cfg.keys.serpapi;
   if (!key) return { hit: null, attempt };
-  for (const id of ids) {
+  for (const token of tokens.slice(0, MAX_TOKENS)) {
     const params = new URLSearchParams({
-      engine: "google_product",
-      product_id: id,
-      offers: "true",
+      engine: "google_immersive_product",
+      page_token: token,
+      more_stores: "true",
       gl: cfg.region,
       hl: cfg.language,
       api_key: key,
@@ -194,17 +209,18 @@ async function viaSerpApi(
       recordFailure(attempt, failureDetail(outcome));
       continue;
     }
-    const sellers = asRecord(outcome.json.sellers_results);
-    const online = asArray(sellers?.online_sellers);
-    const extra = asArray(outcome.json.sellers);
-    for (const item of [...online, ...extra]) {
+    const productResults = asRecord(outcome.json.product_results);
+    const stores = asArray(productResults?.stores);
+    const fallback =
+      stores.length > 0 ? [] : [...asArray(outcome.json.stores), ...asArray(outcome.json.sellers)];
+    for (const item of [...stores, ...fallback]) {
       const r = asRecord(item);
       if (!r) continue;
-      const name = asString(r.name) ?? asString(r.seller) ?? asString(r.source);
+      const name = asString(r.name) ?? asString(r.source) ?? asString(r.store);
       const link = asString(r.link);
       if (!name || !link || !isMerchantUrl(link)) continue;
       const p = asNumber(r.extracted_price) ?? asNumber(r.price);
-      const hit = evaluateSeller(name, link, p, store, price, attempt);
+      const hit = evaluateSeller(name, link, p, store, undefined, attempt);
       if (hit) return { hit, attempt };
     }
   }
@@ -276,45 +292,35 @@ function noMatchReason(
   const failureSuffix = failures.length > 0 ? ` Some resolution requests also failed (${failures.join("; ")}).` : "";
 
   if (requests === 0) {
-    return "No usable product id or token was available for the configured resolution providers.";
+    return "No usable product token was available for the configured resolution providers.";
   }
   if (sellersSeen === 0 && failedRequests === requests) {
     return `All link-resolution requests failed (${failures.join("; ")}).`;
   }
   if (sellersSeen === 0) {
-    return `No sellers were returned for the tried product ids/tokens.${failureSuffix}`;
-  }
-  // Price near-misses can only come from the id route: the token route
-  // matches on name alone, so a token-route name match is a success and
-  // never reaches this reason. The price-mismatch strings below therefore
-  // describe the id route's outcome only.
-  const mismatch = serpAttempt.priceMismatch;
-  if (mismatch && req.price !== undefined) {
-    return `Store "${mismatch.name}" matched by name but its listed price (${mismatch.sellerPrice.toFixed(2)}) differs from the clicked offer's price (${req.price.toFixed(2)}).${failureSuffix}`;
-  }
-  const noPrice = serpAttempt.nameMatchedNoPrice;
-  if (noPrice && req.price !== undefined) {
-    return `Store "${noPrice}" matched by name but listed no price to compare with the clicked offer's price (${req.price.toFixed(2)}).${failureSuffix}`;
+    return `No sellers were returned for the tried product tokens.${failureSuffix}`;
   }
   if (req.store) {
     return `No seller named "${req.store}" among the ${sellersSeen} seller${sellersSeen === 1 ? "" : "s"} returned.${failureSuffix}`;
   }
-  return `None of the ${sellersSeen} seller${sellersSeen === 1 ? "" : "s"} returned matched the clicked offer exactly.${failureSuffix}`;
+  return `None of the ${sellersSeen} seller${sellersSeen === 1 ? "" : "s"} returned matched the clicked store.${failureSuffix}`;
 }
 
 export async function resolveDirectLink(
   req: ResolveLinksRequest,
   cfg: AppConfig,
 ): Promise<ResolveLinksResponse> {
-  // Clicked offer's own ids first, then pooled group ids; identical values
-  // collapse to a single provider call each, capped at 4 ids / 3 tokens.
-  const ids = dedupeValues([req.productId, req.catalogId, ...(req.productIds ?? []), ...(req.catalogIds ?? [])]).slice(0, MAX_IDS);
+  // Clicked offer's own tokens first, then pooled group tokens; identical
+  // values collapse to a single provider call each, capped at 3 tokens
+  // per route. Pooled product/catalog ids are ignored: the SerpApi
+  // google_product id route is retired and every id call fails.
+  const immersiveTokens = dedupeValues(req.immersiveTokens ?? []).slice(0, MAX_TOKENS);
   const tokens = dedupeValues([...(req.productTokens ?? []), req.productToken]).slice(0, MAX_TOKENS);
 
   let serpAttempt = emptyAttempt();
   let searchAttempt = emptyAttempt();
-  if (ids.length > 0 && cfg.keys.serpapi) {
-    const r = await viaSerpApi(ids, req.store, req.price, cfg);
+  if (immersiveTokens.length > 0 && cfg.keys.serpapi) {
+    const r = await viaSerpApiImmersive(immersiveTokens, req.store, cfg);
     serpAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "serpapi" satisfies ProviderId };
   }

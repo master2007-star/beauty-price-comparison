@@ -23,7 +23,10 @@ export async function POST(req: Request) {
     Boolean(body.catalogId) ||
     (body.productIds?.length ?? 0) > 0 ||
     (body.catalogIds?.length ?? 0) > 0;
-  const hasToken = Boolean(body.productToken) || (body.productTokens?.length ?? 0) > 0;
+  const hasToken =
+    Boolean(body.productToken) ||
+    (body.productTokens?.length ?? 0) > 0 ||
+    (body.immersiveTokens?.length ?? 0) > 0;
   if (!hasId && !hasToken) {
     return NextResponse.json(
       { directUrl: null, matchedStore: null, source: null, reason: "No product id or token provided." },
