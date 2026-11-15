@@ -12,8 +12,14 @@
  *  - otherwise (no shared catalog id): same brand AND strong title
  *    overlap AND same variant signature, with strict size handling (a
  *    missing size splits; sizes must agree within tolerance, with unit
- *    normalisation: 16 fl oz == 473 ml).
+ *    normalisation: 16 fl oz == 473 ml). A query-brand fallback lets a
+ *    brand-less title join a group when the search query names the brand
+ *    and at least one title carries that brand token — variant
+ *    strictness still applies.
  * Anything unsure splits into its own group.
+ *
+ * Groups are ordered with multi-store groups first (lowest price within
+ * each tier), so real comparisons surface before single-store listings.
  */
 import { deltaLabel, formatPrice } from "./format";
 import type { Offer, ProductGroup, RawOffer } from "./types";
@@ -222,6 +228,31 @@ export function sameBrand(a: string, b: string): boolean {
   return head(a).includes(bb) || head(b).includes(ba);
 }
 
+/**
+ * Brand token implied by the search query: the first query token that is
+ * not a stopword, not a generic lead word, longer than one character, and
+ * contains no digit. Null when no token qualifies (e.g. "Vitamin C
+ * serum"). Used only as a fallback for brand-less listing titles — it
+ * never overrides two different identified brands.
+ */
+export function extractQueryBrand(query: string): string | null {
+  const tokens = query
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter((t) => t.length > 1 && !STOPWORDS.has(t) && !GENERIC_LEAD_WORDS.has(t) && !/\d/.test(t));
+  return tokens[0] ?? null;
+}
+
+function titleHasToken(title: string, token: string): boolean {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .includes(token);
+}
+
 /* ------------------------------------------------------------------ */
 /* Clustering                                                          */
 /* ------------------------------------------------------------------ */
@@ -244,7 +275,7 @@ export function statedVariantConflict(a: VariantSignature, b: VariantSignature):
   return false;
 }
 
-export function offersMatch(a: PreparedOffer, b: PreparedOffer): boolean {
+export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: string | null = null): boolean {
   // Catalog id first: Google's own product identity anchors the match.
   // Only a stated variant conflict (sizes, SPF, multipack) can split it.
   const ca = a.offer.catalogId;
@@ -253,8 +284,22 @@ export function offersMatch(a: PreparedOffer, b: PreparedOffer): boolean {
   // No shared catalog id: strict path — same variant signature, same
   // brand, strong title overlap. A missing size still splits here.
   if (!sameVariant(a.variant, b.variant)) return false;
-  if (!sameBrand(a.offer.title, b.offer.title)) return false;
-  return titleContainment(a.offer.title, b.offer.title) >= 0.5;
+  if (sameBrand(a.offer.title, b.offer.title)) {
+    return titleContainment(a.offer.title, b.offer.title) >= 0.5;
+  }
+  // Query-brand fallback: only when the brand check failed because at
+  // least one side has no identifiable brand (a generic lead word like
+  // "Moisturizing"). The pair may still match if the query names a brand,
+  // at least one title carries that brand token, and title overlap is
+  // strong. Two different identified brands never reach this branch.
+  if (
+    queryBrand &&
+    (extractBrand(a.offer.title) === null || extractBrand(b.offer.title) === null) &&
+    (titleHasToken(a.offer.title, queryBrand) || titleHasToken(b.offer.title, queryBrand))
+  ) {
+    return titleContainment(a.offer.title, b.offer.title) >= 0.5;
+  }
+  return false;
 }
 
 /** Drop exact duplicates (same store + same product + same price). */
@@ -318,7 +363,11 @@ export function pickCurrency(offers: RawOffer[], fallback: string): string {
   return best;
 }
 
-export function buildGroups(rawOffers: RawOffer[], fallbackCurrency: string): ProductGroup[] {
+export function buildGroups(
+  rawOffers: RawOffer[],
+  fallbackCurrency: string,
+  queryBrand: string | null = null,
+): ProductGroup[] {
   const currency = pickCurrency(rawOffers, fallbackCurrency);
   const priced: PreparedOffer[] = [];
   for (const raw of rawOffers) {
@@ -337,7 +386,7 @@ export function buildGroups(rawOffers: RawOffer[], fallbackCurrency: string): Pr
       // Match against ANY member, not just the first: one quirky first
       // title must not fragment the group. First matching cluster wins,
       // and candidate order is deterministic, so grouping stays stable.
-      if (cluster.some((member) => offersMatch(candidate, member))) {
+      if (cluster.some((member) => offersMatch(candidate, member, queryBrand))) {
         cluster.push(candidate);
         placed = true;
         break;
@@ -379,7 +428,12 @@ export function buildGroups(rawOffers: RawOffer[], fallbackCurrency: string): Pr
     };
   });
 
-  groups.sort((a, b) => a.lowestPrice - b.lowestPrice);
+  // Multi-store groups first (real comparisons surface first), then
+  // single-store groups; lowest price within each tier.
+  groups.sort(
+    (a, b) =>
+      (b.storeCount > 1 ? 1 : 0) - (a.storeCount > 1 ? 1 : 0) || a.lowestPrice - b.lowestPrice,
+  );
   return groups;
 }
 

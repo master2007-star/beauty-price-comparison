@@ -1688,6 +1688,28 @@ img.bento-photo {
   background: var(--cream-2);
 }
 
+.offer-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--cream-2);
+  flex: none;
+}
+
+.offer-thumb-fallback {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  background: var(--cream-2);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  flex: none;
+}
+
 /* Clickable group cards: the whole card opens the detail view. The lift
    matches the other card hovers (shadow + 2px rise, transform-only). */
 .group-card-clickable {
@@ -1731,6 +1753,31 @@ img.bento-photo {
 
 .group-card-clickable:hover .group-cta-arrow {
   transform: translateX(4px);
+}
+
+/* Inline cheapest-store preview on each summary card: the list reads as
+   a comparison at a glance; the detail view still holds every store. */
+.group-mini-rows {
+  margin-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+.group-mini-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px dashed var(--line);
+  font-size: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.group-mini-row:last-child {
+  border-bottom: none;
+}
+
+.group-mini-row .store-name {
+  min-width: 0;
 }
 
 /* --------------------------- product detail --------------------------- */

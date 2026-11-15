@@ -18,6 +18,42 @@ interface ResultsProps {
   onCompare: () => void;
 }
 
+/** Product thumbnail with a load-failure fallback. Plain img: provider
+ *  thumbnails are hotlinked; next/image would need a remote allowlist.
+ *  A failed load swaps to the same placeholder tile used when no image
+ *  URL exists, so a broken image never shows. Callers key it by src so
+ *  a new URL resets the failed state. */
+function ProductThumb({
+  src,
+  imgClass,
+  fallbackClass,
+  eager = false,
+}: {
+  src: string | null;
+  imgClass: string;
+  fallbackClass: string;
+  eager?: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div className={fallbackClass} aria-hidden="true">
+        ✦
+      </div>
+    );
+  }
+  return (
+    <img
+      className={imgClass}
+      src={src}
+      alt=""
+      loading={eager ? "eager" : "lazy"}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function StoreButton({ offer }: { offer: Offer }) {
   const [state, setState] = useState<"idle" | "checking" | "fallback">("idle");
   const [direct, setDirect] = useState<string | null>(offer.directUrl);
@@ -113,12 +149,12 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
       }}
     >
       <div className="group-top">
-        {group.imageUrl ? (
-          // Plain img: provider thumbnails are hotlinked; next/image would need a remote allowlist.
-          <img className="group-thumb" src={group.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
-        ) : (
-          <div className="group-thumb-fallback" aria-hidden="true">✦</div>
-        )}
+        <ProductThumb
+          key={group.imageUrl ?? "none"}
+          src={group.imageUrl}
+          imgClass="group-thumb"
+          fallbackClass="group-thumb-fallback"
+        />
         <div style={{ minWidth: 0 }}>
           <h3 className="group-title">{group.title}</h3>
           <div className="group-meta">
@@ -131,6 +167,16 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
           <div className="low">{group.lowestLabel}</div>
           <div className="range">up to {group.highestLabel}</div>
         </div>
+      </div>
+      <div className="group-mini-rows">
+        {group.offers.slice(0, 3).map((offer, i) => (
+          <div className="group-mini-row" key={`${offer.store}-${offer.price}-${i}`}>
+            <span className="store-name">{offer.store}</span>
+            {offer.isCheapest ? <span className="flag-cheapest">Lowest</span> : null}
+            <span className="store-price">{offer.priceLabel}</span>
+            {offer.deltaLabel ? <span className="delta">{offer.deltaLabel}</span> : null}
+          </div>
+        ))}
       </div>
       <div className="group-cta" aria-hidden="true">
         <span>View all {group.storeCount} {group.storeCount === 1 ? "price" : "prices"}</span>
@@ -155,11 +201,13 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
       </button>
       <div className="detail-card">
         <div className="detail-top">
-          {group.imageUrl ? (
-            <img className="detail-thumb" src={group.imageUrl} alt="" referrerPolicy="no-referrer" />
-          ) : (
-            <div className="detail-thumb-fallback" aria-hidden="true">✦</div>
-          )}
+          <ProductThumb
+            key={group.imageUrl ?? "none"}
+            src={group.imageUrl}
+            imgClass="detail-thumb"
+            fallbackClass="detail-thumb-fallback"
+            eager
+          />
           <div style={{ minWidth: 0, flex: 1 }}>
             <h3 className="detail-title">{group.title}</h3>
             <div className="group-meta">
@@ -209,7 +257,10 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
   const groups = useMemo(() => {
     const list = [...results.groups];
     if (sort === "saving") list.sort((a, b) => b.savingsPercent - a.savingsPercent || a.lowestPrice - b.lowestPrice);
-    else list.sort((a, b) => a.lowestPrice - b.lowestPrice);
+    // Default "lowest price" sort keeps the grouping tier order: real
+    // multi-store comparisons first, then single-store groups, lowest
+    // price within each tier.
+    else list.sort((a, b) => (b.storeCount > 1 ? 1 : 0) - (a.storeCount > 1 ? 1 : 0) || a.lowestPrice - b.lowestPrice);
     return list;
   }, [results.groups, sort]);
 
@@ -322,7 +373,12 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
                       exit={{ y: 6 }}
                       transition={{ type: "spring", stiffness: 120, damping: 20 }}
                     >
-                      {offer.imageUrl ? <img src={offer.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : null}
+                      <ProductThumb
+                        key={offer.imageUrl ?? "none"}
+                        src={offer.imageUrl}
+                        imgClass="offer-thumb"
+                        fallbackClass="offer-thumb-fallback"
+                      />
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{offer.title}</div>
                         <div className="small muted">

@@ -5,7 +5,7 @@
  */
 import { configuredProviders, envVarName, getConfig, type AppConfig } from "./env";
 import { defaultCurrencyForRegion } from "./format";
-import { buildGroups, dedupeOffers, flattenOffers } from "./grouping";
+import { buildGroups, dedupeOffers, extractQueryBrand, flattenOffers } from "./grouping";
 import { PROVIDER_FETCHERS } from "./providers";
 import type {
   AlignedMatch,
@@ -66,7 +66,7 @@ export async function runSearch(query: string, cfg: AppConfig = getConfig()): Pr
   }
 
   const deduped = dedupeOffers(offers);
-  const groups = buildGroups(deduped, defaultCurrencyForRegion(cfg.region));
+  const groups = buildGroups(deduped, defaultCurrencyForRegion(cfg.region), extractQueryBrand(query));
   return {
     query,
     status: "ok",

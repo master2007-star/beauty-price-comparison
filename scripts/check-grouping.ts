@@ -3,7 +3,7 @@
  * No network, no provider keys — pure unit-level checks.
  * Run: npm run check:grouping
  */
-import { buildGroups, dedupeOffers, extractSize, sizesMatch } from "../src/lib/grouping";
+import { buildGroups, dedupeOffers, extractQueryBrand, extractSize, sizesMatch } from "../src/lib/grouping";
 import type { RawOffer } from "../src/lib/types";
 
 let failures = 0;
@@ -90,7 +90,23 @@ check("Pilgrim single is its own group", groups.some((g) => g.title === "Pilgrim
 check("SPF split", groups.filter((g) => g.title.includes("Anthelios")).length === 2);
 check("form split (serum vs cream)", groups.filter((g) => g.title.includes("Minimalist")).length === 2);
 check("different brands split", groups.filter((g) => g.title === "Vitamin C Face Serum 30 ml").length === 2);
-check("groups sorted lowest-first", groups.every((g, i) => i === 0 || g.lowestPrice >= groups[i - 1].lowestPrice));
+/* Ordering: multi-store groups first, lowest price within each tier
+ * (this replaces the old flat lowest-first expectation). */
+const tierOrderOk = (() => {
+  let seenSingle = false;
+  for (const g of groups) {
+    if (g.storeCount === 1) seenSingle = true;
+    else if (seenSingle) return false;
+  }
+  return true;
+})();
+check("multi-store groups sort before single-store groups", tierOrderOk);
+const tierSorted = (tier: typeof groups) =>
+  tier.every((g, i) => i === 0 || g.lowestPrice >= tier[i - 1].lowestPrice);
+check(
+  "lowest-price order within each tier",
+  tierSorted(groups.filter((g) => g.storeCount > 1)) && tierSorted(groups.filter((g) => g.storeCount === 1)),
+);
 
 /* ------------------- catalog-id-first matching ------------------- */
 /* Same catalog id merges even when one title omits the size/SPF;
@@ -153,6 +169,54 @@ const noCatalogMissingSize = buildGroups(dedupeOffers([
   offer({ title: "Dot & Key Vitamin C Serum", store: "Amazon.in", price: 450 }),
 ]), "INR");
 check("missing size without catalogId still splits", noCatalogMissingSize.length === 2, `got ${noCatalogMissingSize.length} groups`);
+
+/* ------------------------- query-brand fallback ------------------------ */
+/* Brand-less titles ("Moisturizing Cream 50ml") can join the group of the
+ * brand named in the query; variant strictness still applies. */
+
+check("query brand from 'CeraVe Moisturizing Cream'", extractQueryBrand("CeraVe Moisturizing Cream") === "cerave");
+check("query brand skips stopwords", extractQueryBrand("best cerave cream") === "cerave");
+check("no query brand from 'Vitamin C serum'", extractQueryBrand("Vitamin C serum") === null);
+
+const brandlessFixtures = [
+  offer({ title: "Moisturizing Cream 50ml", store: "1mg", price: 480 }),
+  offer({ title: "CeraVe Moisturizing Cream 50 ml", store: "Nykaa", price: 550 }),
+  offer({ title: "CeraVe Moisturizing Cream 50ml", store: "Amazon.in", price: 499 }),
+];
+const brandlessMerged = buildGroups(dedupeOffers(brandlessFixtures), "INR", "cerave");
+check("brand-less title merges via query brand", brandlessMerged.length === 1 && brandlessMerged[0].storeCount === 3, `got ${brandlessMerged.length} groups`);
+const brandlessNoQuery = buildGroups(dedupeOffers(brandlessFixtures), "INR", null);
+check("same pair splits without query brand", brandlessNoQuery.length === 2, `got ${brandlessNoQuery.length} groups`);
+const brandlessWrongBrand = buildGroups(dedupeOffers(brandlessFixtures), "INR", "plum");
+check("same pair splits with a different query brand", brandlessWrongBrand.length === 2, `got ${brandlessWrongBrand.length} groups`);
+
+const brandlessFormSplit = buildGroups(dedupeOffers([
+  offer({ title: "Moisturizing Lotion 50ml", store: "1mg", price: 480 }),
+  offer({ title: "CeraVe Moisturizing Cream 50 ml", store: "Nykaa", price: 550 }),
+]), "INR", "cerave");
+check("brand-less lotion vs cream still splits", brandlessFormSplit.length === 2, `got ${brandlessFormSplit.length} groups`);
+
+const brandlessSizeSplit = buildGroups(dedupeOffers([
+  offer({ title: "Moisturizing Cream 50ml", store: "1mg", price: 480 }),
+  offer({ title: "CeraVe Moisturizing Cream 177 ml", store: "Nykaa", price: 800 }),
+]), "INR", "cerave");
+check("brand-less 50ml vs 177ml still splits", brandlessSizeSplit.length === 2, `got ${brandlessSizeSplit.length} groups`);
+
+const bothBrandless = buildGroups(dedupeOffers([
+  offer({ title: "Vitamin C Face Serum 30 ml", store: "Mamaearth", price: 399 }),
+  offer({ title: "Vitamin C Face Serum 30 ml", store: "Plum", price: 420 }),
+]), "INR", "cerave");
+check("both brand-less, no query-brand token → no merge", bothBrandless.length === 2, `got ${bothBrandless.length} groups`);
+
+/* ------------------------------ ordering ------------------------------ */
+
+const ordering = buildGroups(dedupeOffers([
+  offer({ title: "Cheap Solo Serum 30 ml", store: "Nykaa", price: 100 }),
+  offer({ title: "CeraVe Moisturising Cream 50 ml", store: "Nykaa", price: 550, catalogId: "CATO" }),
+  offer({ title: "CeraVe Moisturising Cream 50ml", store: "Amazon.in", price: 499, catalogId: "CATO" }),
+  offer({ title: "CeraVe Moisturising Cream - 50 ml", store: "Purplle", price: 620, catalogId: "CATO" }),
+]), "INR");
+check("3-store group sorts before cheaper 1-store group", ordering.length === 2 && ordering[0].storeCount === 3 && ordering[1].storeCount === 1, `got ${ordering.map((g) => `${g.title}:${g.storeCount}`).join(" / ")}`);
 
 /* ------------------------------ dedupe -------------------------------- */
 
