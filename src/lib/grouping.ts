@@ -3,10 +3,17 @@
  *
  * Two offers join one group only when they are the SAME variant of the SAME
  * product:
- *  - same Google catalog id AND same variant signature, OR
- *  - same brand AND strong title overlap AND same variant signature.
- * Anything unsure splits into its own group. Size is strict, with unit
- * normalisation (16 fl oz == 473 ml).
+ *  - same Google catalog id, UNLESS their stated variant attributes
+ *    conflict: both state a size and the sizes differ beyond tolerance,
+ *    both state SPF and it differs, or multipacks differ. A missing
+ *    size/SPF on one side does NOT split a catalog-id match — Google
+ *    already identifies the product, and one store's shorter title must
+ *    not fragment the group.
+ *  - otherwise (no shared catalog id): same brand AND strong title
+ *    overlap AND same variant signature, with strict size handling (a
+ *    missing size splits; sizes must agree within tolerance, with unit
+ *    normalisation: 16 fl oz == 473 ml).
+ * Anything unsure splits into its own group.
  */
 import { deltaLabel, formatPrice } from "./format";
 import type { Offer, ProductGroup, RawOffer } from "./types";
@@ -224,11 +231,28 @@ interface PreparedOffer {
   variant: VariantSignature;
 }
 
+/**
+ * Do the two variant signatures state CONFLICTING attributes? Only
+ * attributes stated on BOTH sides can conflict: a size stated on one side
+ * and missing on the other is not a conflict. Used for catalog-id
+ * matching, where Google has already identified the product.
+ */
+export function statedVariantConflict(a: VariantSignature, b: VariantSignature): boolean {
+  if (a.size && b.size && !sizesMatch(a.size, b.size)) return true;
+  if (a.spf !== null && b.spf !== null && a.spf !== b.spf) return true;
+  if (a.multipack !== b.multipack) return true;
+  return false;
+}
+
 export function offersMatch(a: PreparedOffer, b: PreparedOffer): boolean {
-  if (!sameVariant(a.variant, b.variant)) return false;
+  // Catalog id first: Google's own product identity anchors the match.
+  // Only a stated variant conflict (sizes, SPF, multipack) can split it.
   const ca = a.offer.catalogId;
   const cb = b.offer.catalogId;
-  if (ca && cb && ca === cb) return true;
+  if (ca && cb && ca === cb) return !statedVariantConflict(a.variant, b.variant);
+  // No shared catalog id: strict path — same variant signature, same
+  // brand, strong title overlap. A missing size still splits here.
+  if (!sameVariant(a.variant, b.variant)) return false;
   if (!sameBrand(a.offer.title, b.offer.title)) return false;
   return titleContainment(a.offer.title, b.offer.title) >= 0.5;
 }
@@ -310,7 +334,10 @@ export function buildGroups(rawOffers: RawOffer[], fallbackCurrency: string): Pr
   for (const candidate of priced) {
     let placed = false;
     for (const cluster of clusters) {
-      if (offersMatch(candidate, cluster[0])) {
+      // Match against ANY member, not just the first: one quirky first
+      // title must not fragment the group. First matching cluster wins,
+      // and candidate order is deterministic, so grouping stays stable.
+      if (cluster.some((member) => offersMatch(candidate, member))) {
         cluster.push(candidate);
         placed = true;
         break;

@@ -158,6 +158,7 @@ export async function fetchSearchApi(query: string, cfg: AppConfig): Promise<Raw
     q: query,
     gl: cfg.region,
     hl: cfg.language,
+    num: "40",
     api_key: key,
   });
   const json = await fetchJson(`https://www.searchapi.io/api/v1/search?${params}`, {}, "searchapi");

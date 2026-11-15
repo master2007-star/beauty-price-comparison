@@ -92,6 +92,68 @@ check("form split (serum vs cream)", groups.filter((g) => g.title.includes("Mini
 check("different brands split", groups.filter((g) => g.title === "Vitamin C Face Serum 30 ml").length === 2);
 check("groups sorted lowest-first", groups.every((g, i) => i === 0 || g.lowestPrice >= groups[i - 1].lowestPrice));
 
+/* ------------------- catalog-id-first matching ------------------- */
+/* Same catalog id merges even when one title omits the size/SPF;
+ * stated conflicts (size, SPF, multipack) still split. */
+
+const catalogMissingSize = buildGroups(dedupeOffers([
+  offer({ title: "CeraVe Moisturising Cream 50 ml", store: "Nykaa", price: 550, catalogId: "CATX" }),
+  offer({ title: "CeraVe Moisturising Cream", store: "Amazon.in", price: 499, catalogId: "CATX" }),
+  offer({ title: "CeraVe Moisturising Cream 50ml", store: "Purplle", price: 620, catalogId: "CATX" }),
+]), "INR");
+check("catalogId + one title missing size → one group", catalogMissingSize.length === 1 && catalogMissingSize[0].storeCount === 3, `got ${catalogMissingSize.length} groups`);
+
+const catalogMissingSpf = buildGroups(dedupeOffers([
+  offer({ title: "La Roche-Posay Anthelios SPF 50 50 ml", store: "Nykaa", price: 1050, catalogId: "CATS" }),
+  offer({ title: "La Roche-Posay Anthelios 50 ml", store: "Amazon.in", price: 999, catalogId: "CATS" }),
+]), "INR");
+check("catalogId + one title missing SPF → one group", catalogMissingSpf.length === 1 && catalogMissingSpf[0].storeCount === 2, `got ${catalogMissingSpf.length} groups`);
+
+const catalogSizeConflict = buildGroups(dedupeOffers([
+  offer({ title: "CeraVe Moisturising Cream 50 ml", store: "Nykaa", price: 550, catalogId: "CATY" }),
+  offer({ title: "CeraVe Moisturising Cream 100 ml", store: "Amazon.in", price: 899, catalogId: "CATY" }),
+]), "INR");
+check("catalogId + conflicting stated sizes → two groups", catalogSizeConflict.length === 2, `got ${catalogSizeConflict.length} groups`);
+
+const catalogSpfConflict = buildGroups(dedupeOffers([
+  offer({ title: "La Roche-Posay Anthelios SPF 30 50 ml", store: "Nykaa", price: 950, catalogId: "CATZ" }),
+  offer({ title: "La Roche-Posay Anthelios SPF 50 50 ml", store: "Amazon.in", price: 1050, catalogId: "CATZ" }),
+]), "INR");
+check("catalogId + conflicting SPF → two groups", catalogSpfConflict.length === 2, `got ${catalogSpfConflict.length} groups`);
+
+const catalogMultipackConflict = buildGroups(dedupeOffers([
+  offer({ title: "Pilgrim Vitamin C Serum 30 ml", store: "Nykaa", price: 450, catalogId: "CATM" }),
+  offer({ title: "Pilgrim Vitamin C Serum 30 ml Pack of 2", store: "Amazon.in", price: 799, catalogId: "CATM" }),
+]), "INR");
+check("catalogId + multipack difference → two groups", catalogMultipackConflict.length === 2, `got ${catalogMultipackConflict.length} groups`);
+
+/* ------------------------- chain clustering ------------------------- */
+/* Candidate matches a NON-first cluster member → joins that group.
+ * Sorted order is Amazon.in, Myntra, Nykaa. The Nykaa cream does NOT
+ * match the first member (serum vs cream forms) but DOES match the
+ * second (form unstated), so any-member matching keeps one group. */
+
+const chain = buildGroups(dedupeOffers([
+  offer({ title: "Minimalist Niacinamide Serum 30 ml", store: "Amazon.in", price: 500, catalogId: "CATCH" }),
+  offer({ title: "Minimalist Niacinamide 30 ml", store: "Myntra", price: 520, catalogId: "CATCH" }),
+  offer({ title: "Minimalist Niacinamide Cream 30 ml", store: "Nykaa", price: 540 }),
+]), "INR");
+check("chain: offer matching non-first member joins group", chain.length === 1 && chain[0].storeCount === 3, `got ${chain.length} groups`);
+
+/* --------------- strictness kept without a catalog id --------------- */
+
+const noCatalogSizeSplit = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C Serum 30 ml", store: "Nykaa", price: 500 }),
+  offer({ title: "Dot & Key Vitamin C Serum 50 ml", store: "Amazon.in", price: 700 }),
+]), "INR");
+check("different sizes without catalogId still split", noCatalogSizeSplit.length === 2, `got ${noCatalogSizeSplit.length} groups`);
+
+const noCatalogMissingSize = buildGroups(dedupeOffers([
+  offer({ title: "Dot & Key Vitamin C Serum 30 ml", store: "Nykaa", price: 500 }),
+  offer({ title: "Dot & Key Vitamin C Serum", store: "Amazon.in", price: 450 }),
+]), "INR");
+check("missing size without catalogId still splits", noCatalogMissingSize.length === 2, `got ${noCatalogMissingSize.length} groups`);
+
 /* ------------------------------ dedupe -------------------------------- */
 
 const dupes = dedupeOffers([
