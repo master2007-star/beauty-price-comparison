@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useInView, useReducedMotion } from "framer-motion";
+import { PHOTOS } from "./photos";
 
 /**
- * Below-fold entrances are TRANSFORM-ONLY (y/scale). Opacity is never
- * animated on scroll-into-view, so no control can ever sit invisible.
+ * Below-fold entrances are TRANSFORM-ONLY (y). Opacity is never animated
+ * on scroll-into-view, so no control can ever sit invisible.
  */
 const rise = {
   hidden: { y: 28 },
@@ -15,51 +16,98 @@ const rise = {
   }),
 };
 
-function SectionHead({ eyebrow, title, blurb }: { eyebrow: string; title: string; blurb?: string }) {
+function SectionHead({ eyebrow, title, blurb }: { eyebrow: string; title: ReactNode; blurb?: string }) {
   return (
     <div className="section-head">
-      <div>
-        <span className="eyebrow">{eyebrow}</span>
-        <h2 className="display">{title}</h2>
-        {blurb ? <p className="muted" style={{ margin: "8px 0 0", maxWidth: "56ch" }}>{blurb}</p> : null}
-      </div>
+      <span className="eyebrow eyebrow-rule">{eyebrow}</span>
+      <h2 className="display">{title}</h2>
+      {blurb ? <p className="section-blurb">{blurb}</p> : null}
     </div>
   );
 }
 
 /* ------------------------------ categories ------------------------------ */
 
-const CATEGORIES = [
-  { emoji: "🍊", title: "Vitamin C serums", query: "Vitamin C serum" },
-  { emoji: "🧴", title: "Moisturisers", query: "moisturizer for dry skin" },
-  { emoji: "☀️", title: "Sunscreens", query: "sunscreen SPF 50" },
-  { emoji: "💄", title: "Lip colour", query: "lipstick" },
-  { emoji: "🧖", title: "Hair wash", query: "shampoo" },
-  { emoji: "✨", title: "Face cleansers", query: "face wash" },
+type BentoKind = "photo" | "lime" | "olive" | "cream" | "sage";
+
+const TILES: Array<{
+  kind: BentoKind;
+  photo?: string;
+  title: string;
+  sub: string;
+  query: string;
+  wide?: boolean;
+}> = [
+  {
+    kind: "photo",
+    photo: PHOTOS.serumBottles,
+    title: "Vitamin C & brightening",
+    sub: "The morning layer everyone overpays for",
+    query: "Vitamin C serum",
+    wide: true,
+  },
+  { kind: "lime", title: "Sunscreen & SPF", sub: "Daily wear, no white cast", query: "Sunscreen SPF 50" },
+  {
+    kind: "photo",
+    photo: PHOTOS.creamTile,
+    title: "Barrier & ceramide care",
+    sub: "Repairs the skin barrier overnight",
+    query: "Ceramide moisturiser",
+  },
+  {
+    kind: "olive",
+    title: "Serums & actives",
+    sub: "Niacinamide, retinol, the targeted stuff",
+    query: "Niacinamide serum",
+  },
+  { kind: "cream", title: "Lip care", sub: "Sleeping masks and overnight repair", query: "Lip sleeping mask" },
+  // DRAFTED — the 6th tile was cut off in the screenshots (only a pale sage
+  // tile edge was visible). Title/subtitle/query are the parent's draft.
+  { kind: "sage", title: "Cleansers", sub: "Gentle daily cleansing", query: "Gentle face cleanser", wide: true },
 ];
 
 export function CategoryBento({ onSearch }: { onSearch: (query: string) => void }) {
   return (
-    <section className="section" aria-label="Browse categories">
+    <section className="section" aria-label="Browse the shelf">
       <div className="wrap">
-        <SectionHead eyebrow="Browse the shelf" title="Start with a category" blurb="Every tile runs a real, live search — no canned results." />
+        <SectionHead
+          eyebrow="Browse the shelf"
+          title={
+            <>
+              Start from a ritual,
+              <br />
+              not a search box.
+            </>
+          }
+          blurb="Six shelves people restock again and again. Tap one and the full comparison — every store, lowest first — runs itself."
+        />
         <div className="bento">
-          {CATEGORIES.map((cat, i) => (
+          {TILES.map((tile, i) => (
             <motion.button
-              key={cat.query}
+              key={tile.title}
               type="button"
-              className="bento-tile"
+              className={`bento-tile bento-${tile.kind}${tile.wide ? " bento-wide" : ""}`}
               custom={i}
               variants={rise}
               initial="hidden"
               whileInView="show"
+              whileHover={{ y: -4 }}
+              whileTap={{ scale: 0.99 }}
               viewport={{ once: true, margin: "-40px" }}
-              onClick={() => onSearch(cat.query)}
+              onClick={() => onSearch(tile.query)}
             >
-              <span className="bento-emoji" aria-hidden="true">{cat.emoji}</span>
-              <span>
-                <span className="bento-title" style={{ display: "block" }}>{cat.title}</span>
-                <span className="bento-query">Search “{cat.query}” →</span>
+              {tile.photo ? (
+                <>
+                  <img className="bento-photo" src={tile.photo} alt="" loading="lazy" decoding="async" />
+                  <span className="bento-shade" aria-hidden="true" />
+                </>
+              ) : null}
+              <span className="bento-text">
+                <span className="bento-title">{tile.title}</span>
+                <span className="bento-sub">{tile.sub}</span>
+              </span>
+              <span className="bento-arrow" aria-hidden="true">
+                →
               </span>
             </motion.button>
           ))}
@@ -69,87 +117,224 @@ export function CategoryBento({ onSearch }: { onSearch: (query: string) => void 
   );
 }
 
-/* ------------------------------ stats band ------------------------------ */
+/* ------------------------------ stat cards ------------------------------ */
 
-export interface LiveStats {
-  storeCount: number | null;
-  offerCount: number | null;
-  bestSavingLabel: string | null;
-  bestSavingPercent: number | null;
-  searched: boolean;
-}
-
-function CountUp({ value, suffix = "" }: { value: number; suffix?: string }) {
+/**
+ * Counts 0 → value once, when the number scrolls into view. The final
+ * number is always exactly `value`; under prefers-reduced-motion the final
+ * number renders immediately with no animation.
+ */
+function CountUp({ value, suffix }: { value: number; suffix?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: "-40px" });
   const reduceMotion = useReducedMotion();
-  const [display, setDisplay] = useState(0);
+  const [shown, setShown] = useState(0);
 
   useEffect(() => {
-    if (!inView) return;
     if (reduceMotion) {
-      setDisplay(value);
+      setShown(value);
       return;
     }
+    if (!inView) return;
     const controls = animate(0, value, {
-      duration: 1.1,
+      duration: 1.4,
       ease: [0.22, 1, 0.36, 1],
-      onUpdate: (v) => setDisplay(Math.round(v)),
+      onUpdate: (v) => setShown(Math.round(v)),
     });
     return () => controls.stop();
-  }, [inView, value, reduceMotion]);
+  }, [inView, reduceMotion, value]);
 
   return (
     <span ref={ref}>
-      {display.toLocaleString("en-IN")}
-      {suffix}
+      {shown}
+      {suffix ?? ""}
     </span>
   );
 }
 
-export function StatsBand({ stats }: { stats: LiveStats }) {
+const STATS = [
+  {
+    value: 4,
+    suffix: "",
+    label: "LIVE PRICE SOURCES",
+    body: "SerpApi, SearchApi.io, Serper and Searlo — every connected key is queried on every search and merged.",
+  },
+  {
+    value: 18,
+    suffix: "",
+    label: "MAJOR STORES TRACKED",
+    body: "Nykaa, Amazon.in, Purplle, Myntra, Flipkart, Tira and more — the results header shows which ones actually listed your product.",
+  },
+  {
+    value: 100,
+    suffix: "%",
+    label: "VARIANT-MATCHED GROUPS",
+    body: "Brand, finish, size and pack must all agree before two listings share a card — a saving is never faked across different products.",
+  },
+];
+
+export function StatsCards() {
   return (
-    <section className="section" style={{ paddingTop: 0 }} aria-label="Latest search stats">
+    <section className="section section-tight" aria-label="About this comparison">
       <div className="wrap">
+        <div className="stat-cards">
+          {STATS.map((stat, i) => (
+            <motion.article
+              key={stat.label}
+              className="stat-card"
+              custom={i}
+              variants={rise}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: "-40px" }}
+            >
+              <div className="stat-number">
+                <CountUp value={stat.value} suffix={stat.suffix} />
+              </div>
+              <div className="stat-tag">{stat.label}</div>
+              <p>{stat.body}</p>
+            </motion.article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------ how it works ------------------------------ */
+
+const STEPS = [
+  {
+    num: "01",
+    title: "Name the product",
+    body: "Brand and product, the way it is printed on the bottle. Specific searches match the exact variant far better than vague ones.",
+  },
+  {
+    num: "02",
+    title: "Same product, stores side by side",
+    body: "Your connected keys query Google Shopping live through SerpApi, SearchApi.io, Serper and Searlo. Listings for the same product are grouped into one card — lowest price up front, the priciest struck through, the saving spelled out. Tap Compare on any product and a fresh search on that exact product hunts down every other store selling it.",
+  },
+  // DRAFTED — step 03 was not visible in the screenshots. Wording is the
+  // parent's draft, from the app's documented direct-link behaviour.
+  {
+    num: "03",
+    title: "Straight to the shelf",
+    body: "Go to Store opens the store's own product page for that exact item — the direct link is looked up per product, with the Google Shopping page only as an honest fallback.",
+  },
+];
+
+export function HowItWorks() {
+  return (
+    <section className="section" aria-label="How it works">
+      <div className="wrap how-grid">
         <motion.div
-          className="stats-band"
+          className="how-photo"
           variants={rise}
           initial="hidden"
           whileInView="show"
           viewport={{ once: true, margin: "-40px" }}
         >
-          <div>
-            <div className="stat-value">
-              {stats.searched && stats.storeCount !== null ? <CountUp value={stats.storeCount} /> : "–"}
-            </div>
-            <div className="stat-label">Stores in the last search</div>
-          </div>
-          <div>
-            <div className="stat-value">
-              {stats.searched && stats.offerCount !== null ? <CountUp value={stats.offerCount} /> : "–"}
-            </div>
-            <div className="stat-label">Priced offers compared</div>
-          </div>
-          <div>
-            <div className="stat-value">
-              {stats.searched && stats.bestSavingPercent !== null && stats.bestSavingPercent > 0 ? (
-                <>
-                  <CountUp value={stats.bestSavingPercent} suffix="%" />
-                </>
-              ) : (
-                "–"
-              )}
-            </div>
-            <div className="stat-label">
-              Biggest saving found{stats.searched && stats.bestSavingLabel ? ` · ${stats.bestSavingLabel}` : ""}
-            </div>
-          </div>
+          <img src={PHOTOS.creamTall} alt="Woman applying face cream to her cheek" loading="lazy" decoding="async" />
         </motion.div>
-        {!stats.searched ? (
-          <p className="muted small" style={{ marginTop: 12 }}>
-            Run a search and this band fills with live numbers from your results. Until then, no numbers are claimed.
-          </p>
-        ) : null}
+        <div>
+          <SectionHead
+            eyebrow="How it works"
+            title={
+              <>
+                Three steps between you
+                <br />
+                and the right price
+              </>
+            }
+          />
+          <ol className="how-steps">
+            {STEPS.map((step, i) => (
+              <motion.li
+                key={step.num}
+                custom={i}
+                variants={rise}
+                initial="hidden"
+                whileInView="show"
+                viewport={{ once: true, margin: "-40px" }}
+              >
+                <span className="how-num" aria-hidden="true">
+                  {step.num}
+                </span>
+                <span>
+                  <span className="how-step-title">{step.title}</span>
+                  <span className="how-step-body">{step.body}</span>
+                </span>
+              </motion.li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* --------------------------- repeat favourites --------------------------- */
+
+const FAVOURITES = [
+  { title: "Vitamin C serums", sub: "Brightening, morning layer", query: "Vitamin C serums" },
+  { title: "SPF 50 sunscreens", sub: "No white cast, daily wear", query: "SPF 50 sunscreens" },
+  { title: "Ceramide moisturisers", sub: "Barrier repair, night layer", query: "Ceramide moisturisers" },
+  { title: "Retinol night creams", sub: "Slow, steady resurfacing", query: "Retinol night creams" },
+  { title: "Lip sleeping masks", sub: "Overnight repair", query: "Lip sleeping masks" },
+];
+
+export function RepeatFavourites({ onSearch }: { onSearch: (query: string) => void }) {
+  return (
+    <section className="section" aria-label="Repeat favourites">
+      <div className="wrap fav-grid">
+        <div>
+          <SectionHead
+            eyebrow="Repeat favourites"
+            title="Start with the shelf staples"
+            blurb="The searches people run again and again. Tap one and the comparison runs itself."
+          />
+          <div className="fav-rows">
+            {FAVOURITES.map((fav, i) => (
+              <motion.button
+                key={fav.title}
+                type="button"
+                className="fav-row"
+                custom={i}
+                variants={rise}
+                initial="hidden"
+                whileInView="show"
+                viewport={{ once: true, margin: "-40px" }}
+                onClick={() => onSearch(fav.query)}
+              >
+                <span className="fav-text">
+                  <span className="fav-title">{fav.title}</span>
+                  <span className="fav-sub">{fav.sub}</span>
+                </span>
+                <span className="fav-arrow" aria-hidden="true">
+                  ↗
+                </span>
+              </motion.button>
+            ))}
+          </div>
+        </div>
+        <motion.figure
+          className="fav-photo"
+          variants={rise}
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, margin: "-40px" }}
+        >
+          <img
+            src={PHOTOS.favourites}
+            alt="Amber skincare bottles arranged with stone blocks"
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption>
+            SKINCARE · MAKEUP · HAIR · FRAGRANCE — IF A STORE SELLS IT THROUGH GOOGLE SHOPPING, IT CAN BE COMPARED
+            HERE.
+          </figcaption>
+        </motion.figure>
       </div>
     </section>
   );
@@ -159,39 +344,52 @@ export function StatsBand({ stats }: { stats: LiveStats }) {
 
 const WHY = [
   {
-    num: "01",
-    title: "Same variant, every store",
-    body: "50 ml is never mixed with 100 ml, and SPF 30 never with SPF 50. Size, pack count and finish all have to match before two listings share a group.",
+    icon: "₹",
+    title: "Same product, real spread",
+    body: "One search groups every store's listing for the exact same variant into one card — lowest price up front, priciest struck through, saving spelled out in rupees and percent.",
   },
   {
-    num: "02",
-    title: "Honest links",
-    body: "A direct store link is shown only when the seller name and the exact price both match. Otherwise you go via the Google Shopping page — and the app says so.",
+    icon: "✓",
+    title: "Matched, not guessed",
+    body: "Brand, finish, size and pack must all agree before listings share a card. When the matcher isn't sure, it splits — it would rather show one store honestly than invent a saving.",
   },
   {
-    num: "03",
-    title: "No invented prices",
-    body: "Every price comes from a live provider response. If a provider fails, you see a warning for that provider — never a made-up number in its place.",
+    icon: "↗",
+    title: "Straight to the shelf",
+    body: "Go to Store lands on the store's own product page for that item — the direct link is looked up per product, with the Google Shopping page only as an honest fallback.",
   },
 ];
 
 export function WhyCards() {
   return (
-    <section className="section" style={{ paddingTop: 0 }} aria-label="Why compare here">
+    <section className="section why-section" aria-label="Why compare here">
       <div className="wrap">
-        <SectionHead eyebrow="Why compare" title="Built to be trusted" />
+        <SectionHead
+          eyebrow="Why compare at all"
+          title={
+            <>
+              The first price you see is
+              <br />
+              rarely the right one
+            </>
+          }
+          blurb="The same bottle sits on a dozen shelves at a dozen prices. This app exists to put those shelves side by side — carefully, so the comparison is always apples to apples."
+        />
         <div className="why-grid">
           {WHY.map((card, i) => (
             <motion.article
-              key={card.num}
+              key={card.title}
               className="why-card"
               custom={i}
               variants={rise}
               initial="hidden"
               whileInView="show"
+              whileHover={{ y: -4 }}
               viewport={{ once: true, margin: "-40px" }}
             >
-              <div className="why-num">{card.num}</div>
+              <div className="why-icon" aria-hidden="true">
+                {card.icon}
+              </div>
               <h3>{card.title}</h3>
               <p>{card.body}</p>
             </motion.article>
@@ -206,33 +404,40 @@ export function WhyCards() {
 
 const FAQ = [
   {
-    q: "Where do the prices come from?",
-    a: "Google Shopping, queried live through up to four provider APIs (SerpApi, SearchApi.io, Serper and Searlo). The provider keys live in the server's environment variables — the browser never sees them.",
+    q: "Where do these prices actually come from?",
+    a: "From Google Shopping, fetched live at the moment you search through your own API keys — SerpApi, SearchApi.io, Serper or Searlo. Nothing is cached or scraped in the background, so a price here is exactly what the source returned seconds ago.",
+  },
+  // DRAFTED — answers 2–5 were not visible in the screenshots. Each is
+  // written from the app's documented behaviour; see the build report.
+  {
+    q: "How do you make sure it's the same product in every store?",
+    a: "Listings are grouped only when the brand, finish, size and pack count all agree — sizes are normalised first, so 16 fl oz and 473 ml count as the same size. When the matcher isn't sure, it splits the listings apart rather than risk comparing two different products.",
   },
   {
-    q: "Why do I sometimes land on a Google page instead of the store?",
-    a: "A direct store link is only used when a seller listing matches both the store name and the exact price. When no exact match is found, the honest fallback is the Google Shopping product page, and the button says so.",
+    q: "What does “Go to Store” open, exactly?",
+    a: "Go to Store opens the store's own product page for that exact item whenever a direct link can be confirmed — the seller name and the exact price both have to match. When no exact match is found, the button takes you to the Google Shopping product page instead, and says so.",
   },
   {
-    q: "Why do two sizes of the same product show separately?",
-    a: "Grouping is size-strict on purpose: a 50 ml serum and a 100 ml serum are different purchases, so they get different groups. Units are normalised first, so 16 fl oz and 473 ml do count as the same size.",
+    q: "Why can the store's price differ from what's shown here?",
+    a: "Prices here are a live snapshot from the moment you searched. Stores can change a price, run a short promotion, or show a different price once delivery or an offer is applied — so the price on the store's own page can differ from the one captured here.",
   },
   {
-    q: "What happens when a provider fails?",
-    a: "You see a warning naming that provider, and results from the providers that did respond still show. Failed providers never contribute placeholder data.",
-  },
-  {
-    q: "Are my searches stored?",
-    a: "No. Each search runs live against the providers and nothing about it is saved on the server.",
+    q: "Are my API keys safe in Settings?",
+    a: "Yes. In this standalone build the keys live only in the server's environment variables — the browser never receives them, and there is nowhere on this site to store or display a full key. Settings shows only the last 4 characters of each configured key, so you can tell them apart.",
   },
 ];
 
 export function Faq() {
   const [open, setOpen] = useState<number | null>(0);
+  const reduceMotion = useReducedMotion();
   return (
-    <section className="section" style={{ paddingTop: 0 }} aria-label="Frequently asked questions">
+    <section className="section" aria-label="Frequently asked questions">
       <div className="wrap">
-        <SectionHead eyebrow="Questions" title="How it works, honestly" />
+        <SectionHead
+          eyebrow="Good questions"
+          title="Before you ask"
+          blurb="How the prices, the matching and your keys actually work — the short, honest version."
+        />
         <div className="faq-list">
           {FAQ.map((item, i) => {
             const isOpen = open === i;
@@ -246,9 +451,9 @@ export function Faq() {
                 >
                   <span>{item.q}</span>
                   <motion.span
-                    className="faq-icon"
+                    className={`faq-icon${isOpen ? " is-open" : ""}`}
                     animate={{ rotate: isOpen ? 45 : 0 }}
-                    transition={{ type: "spring", stiffness: 260, damping: 22 }}
+                    transition={reduceMotion ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 22 }}
                     aria-hidden="true"
                   >
                     +
@@ -261,7 +466,7 @@ export function Faq() {
                       initial={{ height: 0 }}
                       animate={{ height: "auto" }}
                       exit={{ height: 0 }}
-                      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                      transition={{ duration: reduceMotion ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
                     >
                       <div className="faq-a-inner">{item.a}</div>
                     </motion.div>
@@ -280,7 +485,7 @@ export function Faq() {
 
 export function ClosingCta({ onStart }: { onStart: () => void }) {
   return (
-    <section className="section" style={{ paddingTop: 0 }} aria-label="Get started">
+    <section className="section" aria-label="Get started">
       <div className="wrap">
         <motion.div
           className="cta-band"
@@ -289,12 +494,15 @@ export function ClosingCta({ onStart }: { onStart: () => void }) {
           whileInView="show"
           viewport={{ once: true, margin: "-40px" }}
         >
-          <div>
-            <h2 className="display">Stop overpaying for the same bottle.</h2>
-            <p>One search, every store, the exact variant you want — priced live.</p>
-          </div>
-          <button type="button" className="btn" onClick={onStart}>
-            Search now ↑
+          <span className="cta-eyebrow">ONE SEARCH AWAY</span>
+          <h2 className="display">
+            Stop paying the first
+            <br />
+            price you see.
+          </h2>
+          <p>Name the product. See every store that sells it. Buy it once, at the right price.</p>
+          <button type="button" className="cta-btn" onClick={onStart}>
+            Compare a product now ↑
           </button>
         </motion.div>
       </div>

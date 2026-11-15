@@ -104,12 +104,15 @@ Request/response formats follow each provider's published documentation
 ## Frontend notes
 
 - Cream/serif/editorial design with Framer Motion throughout: parallax hero,
-  staggered headline, floating glass badges, reading-progress bar, sticky search
-  bar, store marquee, category bento, animated stat counters, FAQ accordion and
-  an animated compare modal.
+  staggered headline, glass hero pills and cards, glassy sticky and hero
+  search bars, reading-progress bar, store marquee, category bento, animated
+  stat count-ups, FAQ accordion and an animated compare modal.
 - **Motion safety rule:** below-fold entrances are transform-only (no opacity
   gated on scroll-into-view), so no control can ever sit invisible. The UI
   respects `prefers-reduced-motion`.
-- Stats show live-computed values from your latest search, or honest placeholders
-  before the first search. No numbers are invented.
-- System font stacks only — the build never depends on a font CDN.
+- The three stat cards are fixed numbers matching the reference design (4 live
+  price sources, 18 major stores tracked, 100% variant-matched groups). They
+  describe the comparison, not a live measurement; the results header shows
+  which stores actually listed each product.
+- Fonts are self-hosted via `next/font` (Fraunces, Inter, IBM Plex Mono) — the
+  build never depends on a runtime font CDN.

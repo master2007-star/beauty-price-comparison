@@ -1,8 +1,35 @@
 import type { Metadata } from "next";
+import { Fraunces, IBM_Plex_Mono, Inter } from "next/font/google";
 import Link from "next/link";
 import LockGate from "@/components/LockGate";
 import ProgressBar from "@/components/ProgressBar";
+import TopStatus from "@/components/TopStatus";
 import "./globals.css";
+
+// Editorial serif display + clean sans body + mono labels, self-hosted at
+// build time by next/font (no runtime font CDN). Exposed as CSS variables
+// consumed by --font-display / --font-body / --font-mono in globals.css.
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-fraunces",
+  weight: ["400", "500", "600"],
+  style: ["normal", "italic"],
+  display: "swap",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  variable: "--font-plex-mono",
+  weight: ["400", "500"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Beauty Price Comparison — every store, one search",
@@ -12,30 +39,33 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${fraunces.variable} ${inter.variable} ${plexMono.variable}`}>
       <body>
         <ProgressBar />
-        <header className="topbar">
-          <div className="wrap topbar-inner">
-            <Link href="/" className="brand">
-              <span className="brand-name">
-                Beauty Price<span className="brand-dot">.</span>
-              </span>
-              <span className="brand-tag">Compare</span>
-            </Link>
-            <nav className="nav-links" aria-label="Main">
-              <Link href="/" className="nav-link">Search</Link>
-              <Link href="/settings" className="nav-link">Settings</Link>
-            </nav>
-          </div>
-        </header>
+        <TopStatus />
         <LockGate>
           <main>{children}</main>
         </LockGate>
         <footer className="footer">
-          <div className="wrap footer-inner">
-            <span>Prices come from live Google Shopping results via your configured providers. Nothing here is invented.</span>
-            <Link href="/settings">Provider status &amp; setup →</Link>
+          <div className="wrap">
+            <div className="footer-top">
+              <div>
+                <p className="footer-title">Buy it once, at the right price.</p>
+                <p className="footer-note">
+                  Prices refresh with every search and come from Google Shopping via your own API keys. This app
+                  does not sell anything itself.
+                </p>
+              </div>
+              <div className="footer-pills">
+                <Link href="/" className="footer-pill">
+                  Search
+                </Link>
+                <Link href="/settings" className="footer-pill">
+                  Settings &amp; keys
+                </Link>
+              </div>
+            </div>
+            <p className="footer-mono">SERPAPI · SEARCHAPI.IO · SERPER · SEARLO — VIA GOOGLE SHOPPING</p>
           </div>
         </footer>
       </body>

@@ -1,31 +1,67 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import CompareModal from "@/components/CompareModal";
 import Hero from "@/components/Hero";
 import Marquee from "@/components/Marquee";
 import Results, { type SortMode, type ViewMode } from "@/components/Results";
-import { CategoryBento, ClosingCta, Faq, StatsBand, WhyCards, type LiveStats } from "@/components/Sections";
+import {
+  CategoryBento,
+  ClosingCta,
+  Faq,
+  HowItWorks,
+  RepeatFavourites,
+  StatsCards,
+  WhyCards,
+} from "@/components/Sections";
+import Shortcuts from "@/components/Shortcuts";
 import StickySearch from "@/components/StickySearch";
 import { LockedError, searchProducts } from "@/lib/client-api";
 import type { SearchResponse } from "@/lib/types";
+
+const RECENT_KEY = "bp:recent-searches";
+const RECENT_MAX = 8;
+
+function loadRecent(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((q): q is string => typeof q === "string" && q.trim().length > 0).slice(0, RECENT_MAX);
+  } catch {
+    return [];
+  }
+}
 
 export default function HomePage() {
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searched, setSearched] = useState(false);
   const [sort, setSort] = useState<SortMode>("price");
   const [view, setView] = useState<ViewMode>("groups");
   const [compareOpen, setCompareOpen] = useState(false);
+  const [recent, setRecent] = useState<string[]>([]);
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setRecent(loadRecent());
+  }, []);
 
   const runSearch = useCallback(async (query: string) => {
     const q = query.trim();
     if (q.length < 2) return;
     setLoading(true);
     setError(null);
-    setSearched(true);
+    setRecent((prev) => {
+      const next = [q, ...prev.filter((r) => r.toLowerCase() !== q.toLowerCase())].slice(0, RECENT_MAX);
+      try {
+        window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      } catch {
+        /* private mode etc. — recents are a nicety, never load-bearing */
+      }
+      return next;
+    });
     try {
       const res = await searchProducts(q);
       setResults(res);
@@ -41,41 +77,12 @@ export default function HomePage() {
     }
   }, []);
 
-  const stats: LiveStats = useMemo(() => {
-    if (!results || results.status !== "ok") {
-      return { storeCount: null, offerCount: null, bestSavingLabel: null, bestSavingPercent: null, searched };
-    }
-    const stores = new Set(results.offers.map((o) => o.store.toLowerCase()));
-    let best: { label: string; pct: number } | null = null;
-    for (const g of results.groups) {
-      if (g.savingsPercent > 0 && (!best || g.savingsPercent > best.pct)) {
-        best = { label: g.savingsLabel, pct: g.savingsPercent };
-      }
-    }
-    return {
-      storeCount: stores.size,
-      offerCount: results.offers.length,
-      bestSavingLabel: best?.label ?? null,
-      bestSavingPercent: best?.pct ?? null,
-      searched,
-    };
-  }, [results, searched]);
-
-  const marqueeStores = useMemo(() => {
-    if (!results) return [];
-    const seen = new Map<string, string>();
-    for (const o of results.offers) {
-      const key = o.store.toLowerCase();
-      if (!seen.has(key)) seen.set(key, o.store);
-    }
-    return [...seen.values()].slice(0, 12);
-  }, [results]);
-
   return (
     <>
       <StickySearch loading={loading} onSearch={runSearch} />
       <Hero loading={loading} onSearch={runSearch} />
-      <Marquee stores={marqueeStores} />
+      <Shortcuts recent={recent} onSearch={runSearch} />
+      <Marquee />
 
       <div id="results-anchor" ref={resultsRef} style={{ scrollMarginTop: 72 }}>
         {loading ? (
@@ -130,7 +137,9 @@ export default function HomePage() {
       </div>
 
       <CategoryBento onSearch={runSearch} />
-      <StatsBand stats={stats} />
+      <StatsCards />
+      <HowItWorks />
+      <RepeatFavourites onSearch={runSearch} />
       <WhyCards />
       <Faq />
       <ClosingCta
