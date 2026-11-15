@@ -1791,6 +1791,185 @@ img.bento-photo {
   min-width: 0;
 }
 
+/* --------------------- results toolbar (power pack) --------------------- */
+/* Client-side filtering over the returned groups. The strip wraps freely
+   on narrow screens; it sits inside #results, below the results head, so
+   the sticky search bar, RECENT row and marquee are untouched. */
+
+.results-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.toolbar-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 0.86rem;
+  color: var(--ink-chip);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.filter-chip:hover {
+  border-color: var(--olive);
+  transform: translateY(-1px);
+}
+
+/* Selected store chip: olive treatment. The multi-store toggle uses the
+   lime treatment instead, so the two controls read apart at a glance. */
+.filter-chip[aria-pressed="true"] {
+  background: var(--olive);
+  border-color: var(--olive);
+  color: var(--light);
+}
+
+.filter-toggle[aria-pressed="true"] {
+  background: var(--lime);
+  border-color: #d3e86a;
+  color: var(--ink-chip);
+}
+
+.filter-clear {
+  border: none;
+  background: none;
+  padding: 7px 8px;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--terra);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.filter-count {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  margin-left: auto;
+}
+
+/* --------------------- price-span bars (power pack) --------------------- */
+/* Group-card bar: the track is the group's own price span; one dot per
+   distinct offer price, the lowest in terracotta. Fixed heights, rendered
+   with the card — no layout shift. The line/dot entrances are
+   transform-only (framer scaleX/scale) and skipped under
+   prefers-reduced-motion via useReducedMotion in the component. */
+
+.price-span {
+  margin-top: 14px;
+}
+
+.price-span-track {
+  position: relative;
+  height: 12px;
+}
+
+.price-span-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cream-2);
+  transform-origin: 0 50%;
+}
+
+.price-span-dot {
+  position: absolute;
+  top: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--olive-mid);
+  border: 2px solid var(--paper);
+  box-shadow: 0 1px 3px rgba(34, 48, 26, 0.25);
+}
+
+.price-span-dot.is-lowest,
+.price-span-dot.is-only {
+  top: 0;
+  width: 12px;
+  height: 12px;
+  background: var(--terra);
+}
+
+.price-span-dot.is-only {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.price-span-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.price-span-labels.is-single {
+  justify-content: center;
+}
+
+/* Detail-view mini bar: full-width row under each store row, showing
+   where that row's snapshot price sits in the group range. */
+
+.store-row-bar {
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+
+.store-row-bar-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cream-2);
+  overflow: hidden;
+}
+
+.store-row-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--olive-mid);
+  transform-origin: 0 50%;
+}
+
+.store-row-bar-fill.is-cheapest {
+  background: var(--lime);
+  box-shadow: inset 0 0 0 1px #d3e86a;
+}
+
+.store-row-bar-fill.is-flat {
+  background: #c9bfa5;
+  box-shadow: none;
+}
+
 /* --------------------------- product detail --------------------------- */
 
 .detail-back {
@@ -2339,6 +2518,7 @@ img.bento-photo {
   .bento-tile:hover .bento-arrow,
   .cta-btn:hover,
   .btn:hover:not(:disabled),
+  .filter-chip:hover,
   .group-card-clickable:hover,
   .group-card-clickable:hover .group-cta-arrow,
   .pop-chip:hover,
