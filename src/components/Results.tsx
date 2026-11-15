@@ -269,6 +269,7 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
                 </div>
               ) : null}
             </div>
+            <div className="small muted">Prices are from Google Shopping — the store&rsquo;s live price may differ.</div>
           </div>
         </div>
         <StoreRows group={group} showTitles />
