@@ -34,10 +34,16 @@ export function usePointerMotionEnabled(): boolean {
 
 /**
  * Magnetic pull: the element translates a fraction of the cursor's offset
- * from its centre (capped), springing back on leave. Attach `style` to the
- * motion element and the handlers to the same element. The transform lives
- * on the button itself, so it composes with the roll-label (which animates
- * the inner label) without conflict. When disabled, the springs sit at 0.
+ * from its centre (capped), springing back on leave. Attach `style` and
+ * `ref` to the motion element; attach the handlers to that element or to
+ * an ancestor that receives mouse events (SearchForm attaches them to the
+ * search row, because a disabled button fires no mouse events in Chrome
+ * and the handlers would never run). The offset is always measured
+ * against the ref'd element's own rect, and a proximity gate keeps the
+ * element at rest while the cursor is far from it, so hovering distant
+ * parts of an ancestor leaves it unmoved. The transform lives on the
+ * button itself, so it composes with the roll-label (which animates the
+ * inner label) without conflict. When disabled, the springs sit at 0.
  */
 export function useMagnetic(): {
   ref: RefObject<HTMLButtonElement | null>;
@@ -57,6 +63,21 @@ export function useMagnetic(): {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
+    // Proximity gate: when the handlers live on an ancestor, the cursor
+    // can be far from the element (e.g. over the text input next to the
+    // button). Only pull while the cursor is at or near the element
+    // itself; otherwise spring back to rest instead of pinning to the cap.
+    const margin = 48;
+    if (
+      e.clientX < r.left - margin ||
+      e.clientX > r.right + margin ||
+      e.clientY < r.top - margin ||
+      e.clientY > r.bottom + margin
+    ) {
+      x.set(0);
+      y.set(0);
+      return;
+    }
     const cap = 8;
     const dx = e.clientX - (r.left + r.width / 2);
     const dy = e.clientY - (r.top + r.height / 2);

@@ -25,8 +25,14 @@ export default function SearchForm({
   const [value, setValue] = useState(initialValue);
   // Magnetic pull toward the cursor (fine pointer only, no reduced
   // motion). The transform lives on the button element; the roll-label
-  // animates the inner label — different elements, no conflict. At rest
-  // the springs sit at 0, so the button renders exactly as before.
+  // animates the inner label — different elements, no conflict. The mouse
+  // handlers live on the search row, NOT the button: the button is
+  // disabled while the box is empty, and disabled buttons fire no mouse
+  // events in Chrome, so handlers on the button never run in the state
+  // the user actually sees. The hook measures the button's own rect (via
+  // ref) and only pulls near it, so hovering the input leaves the button
+  // at rest. At rest the springs sit at 0, so the button renders exactly
+  // as before.
   const magnetic = useMagnetic();
 
   function submit(e: FormEvent) {
@@ -37,7 +43,7 @@ export default function SearchForm({
 
   return (
     <form onSubmit={submit} role="search">
-      <div className="search-row">
+      <div className="search-row" onMouseMove={magnetic.onMouseMove} onMouseLeave={magnetic.onMouseLeave}>
         <input
           id={inputId}
           className="search-input"
@@ -53,8 +59,6 @@ export default function SearchForm({
           ref={magnetic.ref}
           className="btn roll-btn magnetic-btn"
           style={magnetic.style}
-          onMouseMove={magnetic.onMouseMove}
-          onMouseLeave={magnetic.onMouseLeave}
           type="submit"
           disabled={loading || value.trim().length < 2}
         >

@@ -420,25 +420,42 @@ button {
 
 /* Shine sweep: a diagonal light band parked fully out of view at rest
    (left of the card), sweeping across on hover. Transform-only; clipped
-   by the card's overflow. Hover-only, so touch devices never see it, and
-   removed entirely under prefers-reduced-motion. */
+   by the card's overflow. The band sits UNDER the card text (z-index) so
+   the glyphs stay crisp while the light travels around them, and the
+   gradient has a wide bright core so the sweep reads clearly even over
+   the bright photo seen through the glass — a faint peak alone is
+   invisible against that backdrop. Hover + fine pointer only, so touch
+   devices never see it, and removed entirely under
+   prefers-reduced-motion. */
 .glass-shine {
   position: absolute;
   top: -25%;
   bottom: -25%;
   left: 0;
   width: 45%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  z-index: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 25%,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(255, 255, 255, 0.15) 75%,
+    transparent 100%
+  );
   transform: translateX(-130%) skewX(-18deg);
   transition: transform 0.7s ease;
   pointer-events: none;
 }
 
-.hero-glass:hover .glass-shine {
-  transform: translateX(330%) skewX(-18deg);
+@media (hover: hover) and (pointer: fine) {
+  .hero-glass:hover .glass-shine {
+    transform: translateX(330%) skewX(-18deg);
+  }
 }
 
 .hero-glass-title {
+  position: relative;
+  z-index: 1;
   font-family: var(--font-display);
   font-size: 1.45rem;
   font-weight: 500;
@@ -446,6 +463,8 @@ button {
 }
 
 .hero-glass-sub {
+  position: relative;
+  z-index: 1;
   font-size: 0.88rem;
   color: rgba(253, 251, 245, 0.82);
 }
