@@ -3,7 +3,11 @@
  *
  * Tries, in order:
  *  1. SerpApi google_immersive_product by page_token (more_stores=true)
- *     — stores come back in product_results.stores with merchant links.
+ *     — stores come back in product_results.stores. Verified live
+ *     2026-11-16: every store `link` is a Google redirect URL (aclk),
+ *     NOT a merchant URL, so a name-matching seller's link is followed
+ *     to its merchant destination (adurl param first, else one redirect
+ *     follow) before it counts as a match.
  *     This replaced the retired google_product id route, which always
  *     answered "Google Product hasn't returned any results for this
  *     query" and burned a SerpApi credit on every call; no id-based
@@ -132,6 +136,8 @@ interface ProviderAttempt {
   googleRedirectLinks: number;
   /** Entries missing a usable name or link. */
   missingFields: number;
+  /** Google redirect links successfully followed to a merchant URL. */
+  redirectsResolved: number;
   /** First seller that passed the name gate but whose price differed. */
   priceMismatch: { name: string; sellerPrice: number } | null;
   /** First seller that passed the name gate but listed no price. */
@@ -139,7 +145,7 @@ interface ProviderAttempt {
 }
 
 function emptyAttempt(): ProviderAttempt {
-  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, entriesSeen: 0, googleRedirectLinks: 0, missingFields: 0, priceMismatch: null, nameMatchedNoPrice: null };
+  return { requests: 0, failedRequests: 0, failures: [], sellersSeen: 0, entriesSeen: 0, googleRedirectLinks: 0, missingFields: 0, redirectsResolved: 0, priceMismatch: null, nameMatchedNoPrice: null };
 }
 
 function recordFailure(attempt: ProviderAttempt, detail: string) {
@@ -178,14 +184,57 @@ function evaluateSeller(
   return { name, link, price };
 }
 
+const REDIRECT_TIMEOUT_MS = 4_000;
+const MAX_REDIRECT_FOLLOWS = 3;
+
+/**
+ * The merchant destination of a Google redirect link (e.g. an aclk
+ * URL), or null. Tries the `adurl` query param first (free, no
+ * network — it usually carries the destination, sometimes
+ * double-encoded), then follows the redirect chain once and takes the
+ * final URL. Either way the result must be an absolute http(s)
+ * merchant URL, or it is rejected. Never returns a Google URL.
+ */
+async function resolveRedirectLink(link: string): Promise<string | null> {
+  try {
+    const u = new URL(link);
+    const adurl = u.searchParams.get("adurl");
+    if (adurl) {
+      let dest = adurl;
+      try { dest = decodeURIComponent(dest); } catch { /* keep single-decoded */ }
+      if (isMerchantUrl(dest)) return dest;
+    }
+  } catch {
+    return null;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REDIRECT_TIMEOUT_MS);
+  try {
+    const res = await fetch(link, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "user-agent": "Mozilla/5.0 (compatible; BeautyPriceComparison/1.0)" },
+    });
+    return isMerchantUrl(res.url) ? res.url : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Immersive route: SerpApi's google_immersive_product engine, the
  * replacement for the retired google_product engine. The page_token is
  * the shopping result's immersive_product_page_token (captured at search
  * time). Per SerpApi's docs, stores come back in
- * product_results.stores[] with `name`, `link` (the product purchase
- * URL) and `extracted_price`; more_stores=true returns up to 13 stores
- * instead of the default 3–5. Parsing is defensive: any top-level
+ * product_results.stores[] with `name`, `link` and
+ * `extracted_price`; more_stores=true returns up to 13 stores
+ * instead of the default 3–5. Verified live 2026-11-16: every store
+ * `link` is a Google redirect URL, so name-matching entries have
+ * their link resolved to the merchant page (see
+ * resolveRedirectLink) before they can match. Parsing is defensive: any top-level
  * `stores`/`sellers` array is accepted as a fallback, and the store
  * name is read from `name`/`source`/`store`. A seller matches on the
  * store name ALONE — same reasoning as the SearchApi token route: the
@@ -200,6 +249,7 @@ async function viaSerpApiImmersive(
   const attempt = emptyAttempt();
   const key = cfg.keys.serpapi;
   if (!key) return { hit: null, attempt };
+  let follows = 0;
   for (const token of tokens.slice(0, MAX_TOKENS)) {
     const params = new URLSearchParams({
       engine: "google_immersive_product",
@@ -227,7 +277,22 @@ async function viaSerpApiImmersive(
       const name = asString(r.name) ?? asString(r.source) ?? asString(r.store);
       const link = asString(r.link);
       if (!name || !link) { attempt.missingFields += 1; continue; }
-      if (!isMerchantUrl(link)) { attempt.googleRedirectLinks += 1; continue; }
+      if (!isMerchantUrl(link)) {
+        // Google redirect link (the norm for immersive stores): only
+        // pay for a redirect follow when the name already matches the
+        // clicked store, and cap follows per resolve.
+        attempt.googleRedirectLinks += 1;
+        if (follows >= MAX_REDIRECT_FOLLOWS) continue;
+        if (store && !storesMatch(name, store)) continue;
+        follows += 1;
+        const resolved = await resolveRedirectLink(link);
+        if (!resolved) continue;
+        attempt.redirectsResolved += 1;
+        const p = asNumber(r.extracted_price) ?? asNumber(r.price);
+        const hit = evaluateSeller(name, resolved, p, store, undefined, attempt);
+        if (hit) return { hit, attempt };
+        continue;
+      }
       const p = asNumber(r.extracted_price) ?? asNumber(r.price);
       const hit = evaluateSeller(name, link, p, store, undefined, attempt);
       if (hit) return { hit, attempt };
@@ -297,6 +362,9 @@ function attemptDetail(label: string, a: ProviderAttempt): string {
   const parts = [`${a.entriesSeen} seller ${a.entriesSeen === 1 ? "entry" : "entries"}`];
   if (a.googleRedirectLinks > 0) {
     parts.push(`${a.googleRedirectLinks} Google redirect link${a.googleRedirectLinks === 1 ? "" : "s"}`);
+  }
+  if (a.redirectsResolved > 0) {
+    parts.push(`${a.redirectsResolved} redirect${a.redirectsResolved === 1 ? "" : "s"} followed to a store page`);
   }
   if (a.missingFields > 0) {
     parts.push(`${a.missingFields} missing name/link`);

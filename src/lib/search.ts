@@ -5,7 +5,7 @@
  */
 import { configuredProviders, envVarName, getConfig, type AppConfig } from "./env";
 import { defaultCurrencyForRegion } from "./format";
-import { filterBeautyOffers } from "./beauty-filter";
+import { filterBeautyOffers, isBeautyQuery } from "./beauty-filter";
 import { buildGroups, dedupeOffers, extractQueryBrand, flattenOffers } from "./grouping";
 import { PROVIDER_FETCHERS } from "./providers";
 import type {
@@ -29,6 +29,26 @@ export function noProvidersMessage(cfg: AppConfig): string {
 
 export async function runSearch(query: string, cfg: AppConfig = getConfig()): Promise<SearchResponse> {
   const searchedAt = new Date().toISOString();
+
+  // Query-level beauty guard, BEFORE any provider call: a deliberately
+  // non-beauty query ("badminton racket") must not spend provider credits
+  // — and the title filter alone cannot catch brand-only listings whose
+  // titles carry no category words. Same rule as the title filter
+  // (denylist signal + zero beauty signals). Returns the same empty shape
+  // as a zero-group search; the UI's honest no-results state covers the
+  // display. runCompare inherits this via runSearch.
+  if (!isBeautyQuery(query)) {
+    return {
+      query,
+      status: "ok",
+      providersUsed: [],
+      providerErrors: [],
+      groups: [],
+      offers: [],
+      searchedAt,
+    };
+  }
+
   const providers = configuredProviders(cfg);
 
   if (providers.length === 0) {

@@ -3,7 +3,9 @@
  * No network, no provider keys — pure unit-level checks.
  * Run: npm run check:beauty-filter
  */
-import { filterBeautyOffers, isBeautyRelevant } from "../src/lib/beauty-filter";
+import { filterBeautyOffers, isBeautyQuery, isBeautyRelevant } from "../src/lib/beauty-filter";
+import type { AppConfig } from "../src/lib/env";
+import { runSearch } from "../src/lib/search";
 import type { RawOffer } from "../src/lib/types";
 
 let failures = 0;
@@ -149,5 +151,84 @@ check(
   mixed.map((o) => o.title).join(" | "),
 );
 
-console.log(failures === 0 ? "\nAll beauty-filter checks passed." : `\n${failures} check(s) failed.`);
-process.exit(failures === 0 ? 0 : 1);
+function finish() {
+  console.log(failures === 0 ? "\nAll beauty-filter checks passed." : `\n${failures} check(s) failed.`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+/* --------------------- query-level guard ---------------------------- */
+
+const blockedQueries = [
+  "badminton racket",
+  "kids shoes",
+  "tennis racket",
+  "samsung smartphone",
+  "yoga mat",
+  "cricket bat",
+];
+for (const q of blockedQueries) {
+  check(`query blocked: ${q}`, !isBeautyQuery(q));
+}
+
+const allowedQueries = [
+  "Vitamin C serum",
+  "coffee scrub",
+  "chocolate lip balm",
+  "face wash",
+  "lipstick",
+  "sunscreen SPF 50",
+];
+for (const q of allowedQueries) {
+  check(`query allowed: ${q}`, isBeautyQuery(q));
+}
+
+// Neither signal: passes through unchanged. Honest limit — a bare brand
+// name is never guessed, so "Hundred Powertek 100" still searches.
+check("query passes through: Hundred Powertek 100", isBeautyQuery("Hundred Powertek 100"));
+check("query passes through: Lakme Absolute", isBeautyQuery("Lakme Absolute"));
+
+/* --------------------- runSearch wiring (no network) ----------------- */
+
+// A no-keys config proves the guard fires before any provider call: the
+// blocked query returns the empty ok-shape without reaching the
+// no_providers branch, and the allowed query flows through to it. No
+// provider is ever called, so no keys or network are involved.
+const noKeysCfg: AppConfig = {
+  keys: {},
+  region: "in",
+  language: "en",
+  passcode: null,
+  sessionSecret: null,
+};
+
+async function main() {
+  const blocked = await runSearch("badminton racket", noKeysCfg);
+  check(
+    "runSearch returns empty ok-shape for blocked query",
+    blocked.status === "ok" &&
+      blocked.groups.length === 0 &&
+      blocked.offers.length === 0 &&
+      blocked.providerErrors.length === 0 &&
+      blocked.providersUsed.length === 0 &&
+      blocked.query === "badminton racket",
+    JSON.stringify(blocked),
+  );
+
+  const allowed = await runSearch("Vitamin C serum", noKeysCfg);
+  check(
+    "runSearch passes beauty query through to no_providers",
+    allowed.status === "no_providers" && allowed.groups.length === 0,
+    JSON.stringify(allowed),
+  );
+
+  const passthrough = await runSearch("Hundred Powertek 100", noKeysCfg);
+  check(
+    "runSearch passes neither-signal query through to no_providers",
+    passthrough.status === "no_providers",
+    JSON.stringify(passthrough),
+  );
+
+  finish();
+}
+
+main();

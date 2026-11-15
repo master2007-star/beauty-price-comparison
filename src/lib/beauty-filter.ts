@@ -126,6 +126,19 @@ export function isBeautyRelevant(title: string): boolean {
   return matchesAny(tokens, BEAUTY);
 }
 
+/**
+ * Query-level guard: the SAME rule as isBeautyRelevant, applied to the
+ * search query itself. A query with a denylist signal and zero beauty
+ * signals ("badminton racket") is blocked before any provider call; a
+ * query with a beauty signal ("coffee scrub" — beauty wins ties) or with
+ * neither signal ("Hundred Powertek 100" — a bare brand name, never
+ * guessed) passes through. One rule, one set of lists, shared with the
+ * title filter — the two can never drift apart.
+ */
+export function isBeautyQuery(query: string): boolean {
+  return isBeautyRelevant(query);
+}
+
 /** Drop non-beauty offers from a merged provider result set. */
 export function filterBeautyOffers(offers: RawOffer[]): RawOffer[] {
   return offers.filter((o) => isBeautyRelevant(o.title));
