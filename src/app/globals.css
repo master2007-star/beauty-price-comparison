@@ -64,6 +64,9 @@
 
 html {
   scroll-behavior: smooth;
+  /* Same cream as <body>: on slow mobile loads / overscroll the page
+     behind the content is cream, never browser-default white. */
+  background: var(--cream);
 }
 
 body {
