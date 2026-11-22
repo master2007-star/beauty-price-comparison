@@ -10,7 +10,7 @@ import {
   applyExhaustionMarks,
   PROVIDER_HEALTH_CHANGED_EVENT,
 } from "@/lib/provider-exhaustion";
-import { PROVIDER_IDS } from "@/lib/types";
+import { PROVIDER_IDS, PROVIDER_LABELS } from "@/lib/types";
 
 /**
  * Below-fold entrances are TRANSFORM-ONLY (y). Opacity is never animated
@@ -23,6 +23,13 @@ const rise = {
     transition: { delay: 0.07 * i, type: "spring" as const, stiffness: 90, damping: 18 },
   }),
 };
+
+/** "A, B and C" for provider name lists. */
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names.join("");
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
 
 function SectionHead({ eyebrow, title, blurb }: { eyebrow: string; title: ReactNode; blurb?: string }) {
   return (
@@ -160,21 +167,27 @@ function BentoTile({
  */
 export function StatsCards() {
   const reduceMotion = useReducedMotion();
-  // Live price sources come from /api/status: only providers whose
-  // key is configured AND whose monthly quota is not exhausted count.
-  // Until the status loads, the number shows "–", never 0.
-  const [liveSources, setLiveSources] = useState<number | null>(null);
-  // Same overlay as the header: the browser's own quota marks correct
-  // the per-instance /api/status view. Re-derives when a search
-  // records a new outcome.
+  // Live providers AND their display names, from /api/status: only
+  // providers whose key is configured AND whose monthly quota is not
+  // exhausted count. The browser's own quota marks overlay the
+  // per-instance /api/status view — the same source as the header, so
+  // the number and the names in the body always agree. Re-derives
+  // when a search records a new outcome. Until the status loads, the
+  // number shows "–", never 0.
+  const [health, setHealth] = useState<{ live: string[]; exhausted: string[] } | null>(null);
   useEffect(() => {
     const load = () => {
       fetchStatus()
         .then((raw) => {
           const s = applyExhaustionMarks(raw);
-          setLiveSources(PROVIDER_IDS.filter((id) => s.providers[id]?.live).length);
+          setHealth({
+            live: PROVIDER_IDS.filter((id) => s.providers[id]?.live).map((id) => PROVIDER_LABELS[id]),
+            exhausted: PROVIDER_IDS.filter((id) => s.providers[id]?.configured && !s.providers[id]?.live).map(
+              (id) => PROVIDER_LABELS[id],
+            ),
+          });
         })
-        .catch(() => setLiveSources(null));
+        .catch(() => setHealth(null));
     };
     load();
     window.addEventListener(PROVIDER_HEALTH_CHANGED_EVENT, load);
@@ -183,9 +196,21 @@ export function StatsCards() {
 
   const stats = [
     {
-      value: liveSources === null ? "–" : String(liveSources),
+      value: health === null ? "–" : String(health.live.length),
       label: "LIVE PRICE SOURCES",
-      body: "SerpApi, SearchApi.io, Serper and Searlo — every live key is queried on every search and merged.",
+      // The provider names come from the same live/exhausted state as
+      // the number, so the copy never claims a dead provider is live —
+      // and it updates automatically when a quota resets.
+      body:
+        health === null
+          ? "Every live key is queried on every search and merged."
+          : health.live.length === 0
+            ? "No provider is live right now — check Settings to see which keys are connected."
+            : `${joinNames(health.live)} — every live key is queried on every search and merged.${
+                health.exhausted.length > 0
+                  ? ` ${joinNames(health.exhausted)} quota exhausted — searches continue on the other providers.`
+                  : ""
+              }`,
     },
     {
       value: "18",
@@ -236,7 +261,7 @@ const STEPS = [
   {
     num: "02",
     title: "Same product, stores side by side",
-    body: "Your connected keys query Google Shopping live through SerpApi, SearchApi.io, Serper and Searlo. Listings for the same product are grouped into one card — lowest price up front, the priciest struck through, the saving spelled out. Tap Compare on any product and a fresh search on that exact product hunts down every other store selling it.",
+    body: "Your connected keys query Google Shopping live — only providers that are actually live are queried on every search. Listings for the same product are grouped into one card — lowest price up front, the priciest struck through, the saving spelled out. Tap Compare on any product and a fresh search on that exact product hunts down every other store selling it.",
   },
   // DRAFTED — step 03 was not visible in the screenshots. Wording is the
   // parent's draft, from the app's documented direct-link behaviour.

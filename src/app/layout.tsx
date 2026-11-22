@@ -6,6 +6,7 @@ import AuthSessionProvider from "@/components/AuthSessionProvider";
 import LockGate from "@/components/LockGate";
 import ProgressBar from "@/components/ProgressBar";
 import TopStatus from "@/components/TopStatus";
+import FooterProviders from "@/components/FooterProviders";
 import { getConfig, isGoogleLoginConfigured } from "@/lib/env";
 import { isLockEnabled, isValidSession } from "@/lib/lock";
 import "./globals.css";
@@ -84,7 +85,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 </Link>
               </div>
             </div>
-            <p className="footer-mono">SERPAPI · SEARCHAPI.IO · SERPER · SEARLO — VIA GOOGLE SHOPPING</p>
+            <FooterProviders />
           </div>
         </footer>
         </AuthSessionProvider>
