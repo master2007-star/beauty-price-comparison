@@ -3,7 +3,7 @@
  * No network, no provider keys — pure unit-level checks.
  * Run: npm run check:grouping
  */
-import { buildGroups, dedupeOffers, extractBrand, extractQueryBrand, extractSize, hasBundleMismatch, hasDistinctiveTokens, isBundleTitle, sizesMatch } from "../src/lib/grouping";
+import { buildGroups, dedupeOffers, extractBrand, extractMultipack, extractQueryBrand, extractSize, hasBundleMismatch, hasDistinctiveTokens, isBundleTitle, sizesMatch } from "../src/lib/grouping";
 import type { RawOffer } from "../src/lib/types";
 
 let failures = 0;
@@ -403,6 +403,121 @@ const withUnpriced = buildGroups(
   "INR",
 );
 check("unpriced offers excluded", withUnpriced.every((g) => g.offers.every((o) => o.price > 0)));
+
+/* ------------- live regression: Nov 2026 "Skin Support Set" card ------------- */
+/* A live search for "The Ordinary Niacinamide 10% + Zinc 1% Serum"
+ * (captured 2026-11-22 via /api/search, 69 offers) still produced a
+ * 19-store mixed-brand card AFTER the first strict-identity fix, even
+ * though the fixture tests passed. Root cause, found by replaying the
+ * real titles through the real code: live titles are ingredient- and
+ * percentage-led, which the fixtures never were —
+ *   - extractBrand("10% Niacinamide ...") returned "10" and
+ *     extractBrand("Niacinamide 10% + Zinc 1%") returned "niacinamide",
+ *     and sameBrand's head check matched those pseudo-brands against
+ *     every niacinamide title's first three words. The brand-less
+ *     sweetcare offer bridged the Ordinary cluster to ThriveCo,
+ *     The Element and Minimalist.
+ *   - "Skin Support Set" did not match the old bundle regex (it
+ *     required "set of"), so the set absorbed single serums.
+ * The fixtures below use the exact live titles. */
+
+check("brand null for a percentage-led title", extractBrand("10% Niacinamide Serum with 1% Zinc PCA") === null);
+check("brand null for an ingredient-led title", extractBrand("Niacinamide 10% + Zinc 1%") === null);
+check("brand null for a size-led title", extractBrand("30ml Serum") === null);
+check("brand null for a percentage-led active", extractBrand("2% Salicylic Acid Serum") === null);
+check("brand null for a generic-led title", extractBrand("Brightening 10% Niacinamide Face Serum") === null);
+check("bare 'set' is a bundle", isBundleTitle("The Ordinary Skin Support Set Niacinamide 10% + Zinc 1%"));
+check("'With Pouch' is a bundle", isBundleTitle("The Ordinary Soothing & Barrier Support Serum With Pouch"));
+check("bare 'Pack' is a bundle", isBundleTitle("THE ORDINARY Glycolic Acid 7% Exfoliating Toner-100ml +Niacinamide 10% +Zinc 1% Serum-30ml'('Pack\")\"'by Myntra"));
+check("'Pack of 1' is NOT a bundle", !isBundleTitle("Serum Pack of 1"));
+check("'( pack 2)' is a 2-pack", extractMultipack("The Ordinary Hyaluronic Serum acid 2% + B5 30ml And Niacinamide 10% +zinc 1% Serum ( pack 2) 30ml") === 2);
+check("'60ml 2 pc' is a 2-pack", extractMultipack("The Ordinary N10+Z1 Face Serum (1 Niacinamide 10% + 1% Zinc 2) 60ml 2 pc") === 2);
+
+const liveOrdinary: RawOffer[] = [
+  // The 19-store mixed card, as captured live (providers kept for realism).
+  offer({ title: "10% Niacinamide Serum with 1% Zinc PCA", store: "ThriveCo", price: 379, provider: "serper" }),
+  offer({ title: "10% Niacinamide + 1% Zinc Brightening Serum | The Element Single Pack", store: "The Element", price: 519 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1%", store: "Amazon.in", price: 600, provider: "serper" }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1%", store: "luxe.ajio.com", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1%", store: "Nykaa", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1%, Brightening & Smoothing Serum for Blemish-Prone Skin", store: "The LuxeCare", price: 600 }),
+  offer({ title: "The Ordinary Soothing & Barrier Support Serum With Pouch", store: "Myntra", price: 720 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml/1oz", store: "Strawberrynet.com", price: 1172 }),
+  offer({ title: "THE ORDINARY Glycolic Acid 7% Exfoliating Toner-100ml +Niacinamide 10% +Zinc 1% Serum-30ml'('Pack\")\"'by Myntra", store: "Myntra", price: 1200 }),
+  offer({ title: "The Ordinary Hyaluronic Serum acid 2% + B5 30ml And Niacinamide 10% +zinc 1% Serum ( pack 2) 30ml", store: "Nutraog", price: 1399 }),
+  offer({ title: "The Ordinary Skin Support Set Niacinamide 10% + Zinc 1%", store: "addmecart", price: 1400 }),
+  offer({ title: "The Ordinary Skin Support Set Niacinamide 10% + Zinc 1%", store: "Fliptwirls", price: 1400, provider: "searlo" }),
+  offer({ title: "The Ordinary The Skin Support Set", store: "Escentual", price: 1700 }),
+  offer({ title: "The Ordinary Soothing & Barrier Support Serum", store: "Nykaa", price: 1850 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% - Blemish Control & Pore Minimizing Serum 30 ml", store: "Instachiq", price: 1886.29, provider: "serper" }),
+  offer({ title: "Niacinamide 10% + Zinc 1%", store: "sweetcare.com", price: 1924.14 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Smoothing Serum For Blemish-Prone Skin 4.1 Fl Oz", store: "KIWLA", price: 2024 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml)", store: "KIWLA", price: 2089 }),
+  offer({ title: "The Ordinary The Skin Support Set", store: "Care to Beauty", price: 2282.26, provider: "serper" }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum", store: "GoSupps Beauty", price: 2778.56 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum for Face 1 FL OZ with Alive Intensity Hyaluronic Acid Face Serum", store: "GoSupps Beauty", price: 4631.55, provider: "searlo" }),
+  offer({ title: "The Ordinary N10+Z1 Face Serum (1 Niacinamide 10% + 1% Zinc 2) 60ml 2 pc", store: "Japan Shop Fuji", price: 5095.72, provider: "searlo" }),
+  offer({ title: "THE ORDINARY Niacinamide Zinc Educes Skin Irritation Blemish Formula", store: "GoSupps Beauty", price: 6947.78, provider: "searlo" }),
+  offer({ title: "The Ordinary 3 Bottles Face Serum Set! Hyaluronic Acid Serum, Rosehip Oil And Niacinamide Serum! Hyaluronic Ac", store: "GoSupps.com", price: 7874.28, provider: "serper" }),
+  // The 9-store mixed card (g2), as captured live.
+  offer({ title: "Minimalist 10% Niacinamide Face Serum", store: "Purplle.com - Purplle- MP", price: 237, provider: "serper" }),
+  offer({ title: "10% Niacinamide + 1% Zinc Face Serum for Acne Marks, Blemishes & Oil Balancing | Skin Clarifying Anti Acne Serum for Oily & Acne Prone Skin | 30 ml", store: "amazon.in", price: 399, provider: "serper" }),
+  offer({ title: "10% Niacinamide Face Serum with 0.5% Zinc, 30ml – Oil Control Serum for Clear, Smooth & Balanced Looking Skin", store: "MNT", price: 460 }),
+  offer({ title: "Minimalist Niacinamide 10% + Zinc Face Serum", store: "Nykaa Now", price: 569, provider: "serper" }),
+  offer({ title: "Minimalist 10% Niacinamide Face Serum", store: "Shoppers Stop", price: 599 }),
+  offer({ title: "Glutone 10% Niacinamide + Zinc Serum for Oily", store: "Dermalogy Care", price: 679 }),
+  offer({ title: "10% Niacinamide Serum with 1% Zinc PCA", store: "Maccaron", price: 699 }),
+  offer({ title: "Buy 10% Niacinamide Face Serum", store: "SkinInspired", price: 799, provider: "serper" }),
+  offer({ title: "Buy 10% Niacinamide Face Serum Best For Acne & Oily Skin", store: "SkinInspired", price: 799, provider: "serper" }),
+  offer({ title: "10% niacinamide Oil control serum with Zinc 1%", store: "New69BC", price: 1319, provider: "serper" }),
+  // The three single-bottle cards.
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1%, Brightening & Smoothing Serum for Blemish-Prone Skin, 30ml 30 ml (Pack of 2)", store: "Syga India", price: 1080 }),
+  offer({ title: "The Ordinary Niacinamide 10% + जिंक 1%, ब्राइटनिंग और स्मूथिंग सीरम ब्लेमिश-प्रोन स्किन के लिए, 60ml", store: "amazon.in", price: 1100 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1%, Brightening & Smoothing Serum for Blemish-Prone Skin, 60ml (Pack of 2)", store: "amazon.in", price: 2200 }),
+];
+
+const liveGroups = buildGroups(
+  dedupeOffers(liveOrdinary),
+  "INR",
+  extractQueryBrand("The Ordinary Niacinamide 10% + Zinc 1% Serum"),
+);
+const groupOf = (store: string, price: number) =>
+  liveGroups.find((g) => g.offers.some((o) => o.store === store && o.price === price));
+const ordinaryGroup = groupOf("Amazon.in", 600);
+check(
+  "live: single-bottle serum merges across 9 stores (was fragmented + mixed)",
+  ordinaryGroup !== undefined && ordinaryGroup.storeCount === 9 && ordinaryGroup.lowestPrice === 600,
+  `storeCount=${ordinaryGroup?.storeCount}`,
+);
+check(
+  "live: no other brand shares the Ordinary serum group",
+  ordinaryGroup !== undefined &&
+    ordinaryGroup.offers.every((o) => o.title.toLowerCase().includes("ordinary") || o.title === "Niacinamide 10% + Zinc 1%"),
+  ordinaryGroup?.offers.map((o) => `${o.store}:${o.title.slice(0, 30)}`).join(" / ") ?? "",
+);
+const setGroup = groupOf("addmecart", 1400);
+check(
+  "live: Skin Support Set is its own 4-store group (was the 19-store mixed card)",
+  setGroup !== undefined && setGroup.storeCount === 4 && setGroup.offers.every((o) => o.title.includes("Skin Support Set")),
+  `storeCount=${setGroup?.storeCount}`,
+);
+check("live: ThriveCo stands alone", groupOf("ThriveCo", 379)?.offers.length === 1);
+check("live: The Element stands alone", groupOf("The Element", 519)?.offers.length === 1);
+check("live: Glutone stands alone", groupOf("Dermalogy Care", 679)?.offers.length === 1);
+const minimalistGroup = groupOf("Purplle.com - Purplle- MP", 237);
+check(
+  "live: Minimalist trio stays one 3-store group",
+  minimalistGroup !== undefined && minimalistGroup.storeCount === 3,
+  `storeCount=${minimalistGroup?.storeCount}`,
+);
+check(
+  "live: the two 60ml Amazon cards stay separate — 1-pack vs 2-pack, not the same variant (₹2,200 is exactly 2× ₹1,100)",
+  groupOf("amazon.in", 1100) !== groupOf("amazon.in", 2200),
+);
+check(
+  "live: 30ml 2-pack Syga stays separate from the 60ml singles (size + pack differ)",
+  groupOf("Syga India", 1080)?.offers.length === 1,
+);
 
 console.log(failures === 0 ? "\nAll grouping checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

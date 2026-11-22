@@ -18,6 +18,7 @@ import {
 import Shortcuts from "@/components/Shortcuts";
 import StickySearch from "@/components/StickySearch";
 import { fetchStatus, LockedError, searchProducts } from "@/lib/client-api";
+import { recordSearchOutcome } from "@/lib/provider-exhaustion";
 import type { SearchResponse } from "@/lib/types";
 
 const RECENT_KEY = "bp:recent-searches";
@@ -74,6 +75,10 @@ export default function HomePage() {
     });
     try {
       const res = await searchProducts(q);
+      // Remember quota exhaustion this browser observed, so the header
+      // and stats stop claiming a dead provider is live (the server's
+      // per-instance memory cannot see it — see provider-exhaustion).
+      recordSearchOutcome(res.providersUsed, res.providerErrors);
       setResults(res);
     } catch (e) {
       if (e instanceof LockedError) return; // LockGate re-opens.

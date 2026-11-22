@@ -100,6 +100,12 @@ const MULTIPACK_RES = [
   /\(x\s*(\d+)\)/i,
   /(\d+)\s*[-x×]\s*\d+\s*(?:ml|g|oz|fl)/i,
   /\b(\d+)\s*pack\b/i,
+  // "( pack 2)" — pack count written after the word. Single digit only:
+  // "Pack 30ml" is a size, not a count, so a two-digit number never
+  // counts here (live Nov 2026: the Nutraog 2-pack hid behind this).
+  /pack\s+([2-9])\b/i,
+  // "60ml 2 pc" — piece count. "1 pc" is a single (ignored by the >1 check).
+  /(\d{1,2})\s*pcs?\b/i,
 ];
 
 export function extractMultipack(title: string): number {
@@ -215,11 +221,33 @@ const GENERIC_LEAD_WORDS = new Set([
   "whitening", "lightening", "fairness", "acne", "pimple", "dark", "spot",
   "pigmentation", "tan", "removal", "remover", "kit", "combo", "bundle",
   "value", "trial", "mini", "travel", "refill", "duo", "trio",
+  // Ingredient / active words. A title led by one names no brand —
+  // "Niacinamide 10% + Zinc 1% Serum" is a product description, not a
+  // brand, and treating "niacinamide" as a brand let every niacinamide
+  // listing merge with every other (live Nov 2026: the 19-store
+  // "Skin Support Set" card mixed ThriveCo, The Element and Minimalist
+  // under a The Ordinary title). Same for extractQueryBrand: a query
+  // naming only an ingredient names no brand, so the query-brand
+  // fallback stays off.
+  "niacinamide", "niacin", "retinol", "retinoid", "bakuchiol",
+  "hyaluronic", "salicylic", "glycolic", "lactic", "mandelic", "ferulic",
+  "ascorbic", "ceramide", "ceramides", "peptide", "peptides", "collagen",
+  "elastin", "biotin", "keratin", "caffeine", "arbutin", "kojic",
+  "azelaic", "squalane", "squalene", "panthenol", "allantoin", "urea",
+  "adenosine", "glutathione", "tranexamic", "centella", "madecassoside",
+  "snail", "mucin", "propolis", "honey", "shea", "cocoa", "jojoba",
+  "argan", "rosehip", "aha", "bha", "pha", "zinc", "titanium",
+  "tocopherol",
 ]);
 
 export function coreTokens(title: string): Set<string> {
-  const tokens = title
+  // Normalise size spellings first: "50ml" and "50 ml" are the same
+  // size, so split digit-unit boundaries before tokenising. Without
+  // this, "50ml" and "50 ml" share no size token at all.
+  const normalised = title
     .toLowerCase()
+    .replace(/(\d)(ml|g|gm|kg|oz|fl|l)\b/g, "$1 $2");
+  const tokens = normalised
     .replace(/[^a-z0-9%]+/g, " ")
     .split(" ")
     .filter((t) => t.length > 1 && !STOPWORDS.has(t) && !/^\d+(\.\d+)?$/.test(t));
@@ -234,6 +262,29 @@ export function titleContainment(a: string, b: string): number {
   let shared = 0;
   for (const t of ta) if (tb.has(t)) shared++;
   return shared / Math.min(ta.size, tb.size);
+}
+
+/** How many core tokens the two titles share. */
+export function sharedTokenCount(a: string, b: string): number {
+  const ta = coreTokens(a);
+  const tb = coreTokens(b);
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  return shared;
+}
+
+/**
+ * Title agreement for merging: containment ≥ 0.5 AND at least 3 shared
+ * tokens. The count floor matters because containment alone lets a
+ * near-empty title merge anywhere: "The Ordinary The Skin Support
+ * Set" keeps only 3 core tokens after stopwords drop out, so sharing
+ * "ordinary" + "support" with a serum title scored 0.67 and the set
+ * absorbed a serum-with-pouch (live Nov 2026). Genuine same-product
+ * pairs share brand + product words — at least 3 tokens — while a
+ * 2-token overlap is a coincidence, not an identity.
+ */
+export function titlesAgree(a: string, b: string): boolean {
+  return titleContainment(a, b) >= 0.5 && sharedTokenCount(a, b) >= 3;
 }
 
 /**
@@ -267,7 +318,12 @@ export function extractBrand(title: string): string | null {
   let i = 0;
   while (i < tokens.length && STOPWORDS.has(tokens[i])) i++;
   const first = tokens[i];
-  if (!first || first.length < 2 || GENERIC_LEAD_WORDS.has(first)) return null;
+  // A digit-led first token is a percentage, a size or a count — never
+  // a brand. "10% Niacinamide ..." used to extract brand "10", and
+  // the sameBrand head check then matched it against every title
+  // carrying "10" in its first three words (live Nov 2026: that is
+  // how ThriveCo and The Element joined the Ordinary card).
+  if (!first || first.length < 2 || /^\d/.test(first) || GENERIC_LEAD_WORDS.has(first)) return null;
   return first;
 }
 
@@ -277,10 +333,13 @@ export function sameBrand(a: string, b: string): boolean {
   if (!ba || !bb) return false;
   if (ba === bb) return true;
   // One brand token appearing in the other's first three tokens (e.g.
-  // "CeraVe" vs "CeraVe Moisturising Cream ...").
+  // a retailer-prefixed "Nykaa CeraVe ..." vs "CeraVe ..."). The
+  // matched token must be at least 3 letters: a 1–2 letter token in
+  // the first three words is a fragment ("la", "10"), not a brand,
+  // and matching on it merges unrelated products.
   const head = (t: string) =>
     t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").slice(0, 3);
-  return head(a).includes(bb) || head(b).includes(ba);
+  return (bb.length >= 3 && head(a).includes(bb)) || (ba.length >= 3 && head(b).includes(ba));
 }
 
 /**
@@ -306,6 +365,34 @@ function titleHasToken(title: string, token: string): boolean {
     .replace(/[^a-z0-9]+/g, " ")
     .split(" ")
     .includes(token);
+}
+
+/**
+ * Fallback token agreement: the two titles must name exactly the same
+ * product line — their significant-token sets (with the query-brand
+ * token itself removed, since the brand is already established by the
+ * fallback's brand conditions and the branded side's own brand token
+ * is dropped by significantTokens) must be EQUAL. A subset rule is
+ * not enough: a noisy branded title ("... Blemish Control & Pore
+ * Minimizing Serum 30 ml") contains "control", so a brand-less
+ * "Oil control serum" passed a subset check against it and the
+ * 16-store g2 card re-formed (live Nov 2026). Equality blocks that
+ * while still letting a truly brand-less copy through ("Niacinamide
+ * 10% + Zinc 1%" vs the Ordinary serum: both {niacinamide, zinc}).
+ * An omitted line word blocks too — a niacinamide serum with no zinc
+ * named is not provably the niacinamide+zinc serum.
+ */
+function fallbackTokensAgree(aTitle: string, bTitle: string, queryBrand: string): boolean {
+  const strip = (s: Set<string>) => {
+    const out = new Set(s);
+    out.delete(queryBrand);
+    return out;
+  };
+  const sa = strip(significantTokens(aTitle));
+  const sb = strip(significantTokens(bTitle));
+  if (sa.size !== sb.size) return false;
+  for (const t of sa) if (!sb.has(t)) return false;
+  return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -368,6 +455,13 @@ const CLAIM_WORDS = new Set([
   "value", "trial", "mini", "travel", "refill", "sample", "samples",
   "tester", "online", "buy", "best", "shop", "shopping", "store",
   "official", "authentic", "genuine", "product",
+  // Price / purchase noise — never a product line. Without these, a
+  // brand-less title carrying "best price" fails the fallback's
+  // significant-token equality against the clean branded title.
+  "price", "prices", "offer", "offers", "discount", "discounts", "deal",
+  "deals", "sale", "mrp", "delivery", "shipping", "order", "orders",
+  "cheap", "cheapest", "lowest", "taxes", "inclusive", "emi", "cod",
+  "seller", "sellers",
   // Form-like product words not in FORM_WORDS
   "essence", "elixir", "concentrate", "ampoule", "milk", "water", "blue",
 ]);
@@ -432,11 +526,22 @@ export function hasDistinctiveTokens(a: string, b: string): boolean {
   return aOnly && bOnly;
 }
 
-/** Bundle/kit signals: multi-item packs, never a single product. */
-const BUNDLE_RE = /\b(combo|bundle|kit|duo|trio|pack\s+of|value\s+pack|set\s+of)\b/i;
+/**
+ * Bundle/kit signals: multi-item packs, never a single product.
+ * Bare "set" counts — "Skin Support Set" is a set even without "of"
+ * (live Nov 2026: the set title absorbed single serums because the old
+ * regex required "set of"). Bare "pack" counts too, except "Pack of 1",
+ * which is explicitly a single unit. "Pouch" counts: a serum sold with
+ * a pouch is a different SKU from the serum alone.
+ */
+const BUNDLE_RES = [
+  /\b(combo|bundle|kit|duo|trio|value\s+pack|set|pouch)\b/i,
+  /\bpack\s+of\s+(?!1\b)\d+/i,
+  /\bpack\b(?!\s+of\b)/i,
+];
 
 export function isBundleTitle(title: string): boolean {
-  return BUNDLE_RE.test(title);
+  return BUNDLE_RES.some((re) => re.test(title));
 }
 
 /** True when exactly one title is a bundle — a kit never merges with a single. */
@@ -489,7 +594,7 @@ export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: stri
   if (hasBundleMismatch(a.offer.title, b.offer.title)) return false;
   if (hasDistinctiveTokens(a.offer.title, b.offer.title)) return false;
   if (sameBrand(a.offer.title, b.offer.title)) {
-    return titleContainment(a.offer.title, b.offer.title) >= 0.5;
+    return titlesAgree(a.offer.title, b.offer.title);
   }
   // Query-brand fallback: only when the brand check failed because at
   // least one side has no identifiable brand (a generic lead word like
@@ -505,9 +610,10 @@ export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: stri
       (ba === null || bb === null) &&
       (ba === null || ba === queryBrand) &&
       (bb === null || bb === queryBrand) &&
-      (titleHasToken(a.offer.title, queryBrand) || titleHasToken(b.offer.title, queryBrand))
+      (titleHasToken(a.offer.title, queryBrand) || titleHasToken(b.offer.title, queryBrand)) &&
+      fallbackTokensAgree(a.offer.title, b.offer.title, queryBrand)
     ) {
-      return titleContainment(a.offer.title, b.offer.title) >= 0.5;
+      return titlesAgree(a.offer.title, b.offer.title);
     }
   }
   return false;

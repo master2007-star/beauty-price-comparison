@@ -6,6 +6,10 @@ import { PHOTOS } from "./photos";
 import { useMagnetic, useTilt } from "./pointer-motion";
 import RollLabel from "./RollLabel";
 import { fetchStatus } from "@/lib/client-api";
+import {
+  applyExhaustionMarks,
+  PROVIDER_HEALTH_CHANGED_EVENT,
+} from "@/lib/provider-exhaustion";
 import { PROVIDER_IDS } from "@/lib/types";
 
 /**
@@ -160,12 +164,21 @@ export function StatsCards() {
   // key is configured AND whose monthly quota is not exhausted count.
   // Until the status loads, the number shows "–", never 0.
   const [liveSources, setLiveSources] = useState<number | null>(null);
+  // Same overlay as the header: the browser's own quota marks correct
+  // the per-instance /api/status view. Re-derives when a search
+  // records a new outcome.
   useEffect(() => {
-    fetchStatus()
-      .then((s) => {
-        setLiveSources(PROVIDER_IDS.filter((id) => s.providers[id]?.live).length);
-      })
-      .catch(() => setLiveSources(null));
+    const load = () => {
+      fetchStatus()
+        .then((raw) => {
+          const s = applyExhaustionMarks(raw);
+          setLiveSources(PROVIDER_IDS.filter((id) => s.providers[id]?.live).length);
+        })
+        .catch(() => setLiveSources(null));
+    };
+    load();
+    window.addEventListener(PROVIDER_HEALTH_CHANGED_EVENT, load);
+    return () => window.removeEventListener(PROVIDER_HEALTH_CHANGED_EVENT, load);
   }, []);
 
   const stats = [

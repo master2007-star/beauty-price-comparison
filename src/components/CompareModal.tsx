@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { compareQueries } from "@/lib/client-api";
+import { recordSearchOutcome } from "@/lib/provider-exhaustion";
 import type { CompareResponse } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 
@@ -47,6 +48,7 @@ export default function CompareModal({ open, initialQueries, onClose }: CompareM
     setError(null);
     try {
       const res = await compareQueries(qs);
+      for (const r of res.results) recordSearchOutcome(r.providersUsed, r.providerErrors);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Compare failed.");

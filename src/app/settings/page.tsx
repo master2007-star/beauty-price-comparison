@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { fetchStatus, logout } from "@/lib/client-api";
+import {
+  applyExhaustionMarks,
+  PROVIDER_HEALTH_CHANGED_EVENT,
+} from "@/lib/provider-exhaustion";
 import type { StatusResponse } from "@/lib/types";
 import { PROVIDER_IDS, PROVIDER_LABELS } from "@/lib/types";
 
@@ -10,9 +14,14 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchStatus()
-      .then(setStatus)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load status."));
+    const load = () => {
+      fetchStatus()
+        .then((raw) => setStatus(applyExhaustionMarks(raw)))
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load status."));
+    };
+    load();
+    window.addEventListener(PROVIDER_HEALTH_CHANGED_EVENT, load);
+    return () => window.removeEventListener(PROVIDER_HEALTH_CHANGED_EVENT, load);
   }, []);
 
   async function lockNow() {

@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
 import { fetchStatus } from "@/lib/client-api";
+import {
+  applyExhaustionMarks,
+  PROVIDER_HEALTH_CHANGED_EVENT,
+} from "@/lib/provider-exhaustion";
 import { PROVIDER_IDS } from "@/lib/types";
 
 /** Status line exactly as the artifact shows it, built from /api/status. */
@@ -58,9 +62,14 @@ export default function TopStatus({ googleConfigured }: { googleConfigured: bool
   const [line, setLine] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
 
-  useEffect(() => {
+  // The /api/status view of liveness is per server instance and can
+  // miss a quota exhaustion another instance observed, so the
+  // browser's own marks (recorded from real searches) overlay it.
+  // Re-derives when a search records a new outcome.
+  const load = useCallback(() => {
     fetchStatus()
-      .then((s) => {
+      .then((raw) => {
+        const s = applyExhaustionMarks(raw);
         // Live, not merely configured: a provider whose monthly quota
         // is exhausted is not presented as live until a re-probe
         // proves its quota is back.
@@ -84,6 +93,12 @@ export default function TopStatus({ googleConfigured }: { googleConfigured: bool
       })
       .catch(() => setLine("PROVIDER STATUS UNAVAILABLE"));
   }, []);
+
+  useEffect(() => {
+    load();
+    window.addEventListener(PROVIDER_HEALTH_CHANGED_EVENT, load);
+    return () => window.removeEventListener(PROVIDER_HEALTH_CHANGED_EVENT, load);
+  }, [load]);
 
   return (
     <div className="statusbar">
