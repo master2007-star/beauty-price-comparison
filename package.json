@@ -1,12 +1,13 @@
 {
   "dependencies": {
+    "@vercel/postgres": "^0.10.0",
     "framer-motion": "^12.0.0",
     "next": "^15.0.0",
     "next-auth": "^5.0.0-beta.32",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "description": "Standalone beauty price comparison \u2014 Google Shopping prices from four providers, grouped by exact product variant.",
+  "description": "Standalone beauty price comparison — Google Shopping prices from four providers, grouped by exact product variant.",
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
@@ -18,10 +19,12 @@
   "private": true,
   "scripts": {
     "build": "next build",
+    "check-price-history": "tsx scripts/check-price-history.ts",
     "check:beauty-filter": "tsx scripts/check-beauty-filter.ts",
     "check:gemini": "tsx scripts/check-gemini.ts",
     "check:grouping": "tsx scripts/check-grouping.ts",
     "check:live-price": "tsx scripts/check-live-price.ts",
+    "check:price-history": "tsx scripts/check-price-history.ts",
     "dev": "next dev",
     "start": "next start"
   },

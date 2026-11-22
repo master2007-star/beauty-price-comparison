@@ -56,6 +56,7 @@ export interface Offer {
 
 export interface ProductGroup {
   id: string;
+  productKey: string;
   title: string;
   imageUrl: string | null;
   currency: string;

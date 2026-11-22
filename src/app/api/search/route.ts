@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getConfig } from "@/lib/env";
 import { isAuthorized } from "@/lib/guard";
 import { runSearch } from "@/lib/search";
+import { recordSnapshots } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,5 +25,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Query must be between 2 and 120 characters." }, { status: 400 });
   }
   const result = await runSearch(query, getConfig());
+
+  if (result && Array.isArray(result.groups) && result.groups.length > 0) {
+    after(async () => {
+      try {
+        const offersToRecord = result.groups.flatMap((g) =>
+          g.offers.map((o) => ({
+            productKey: g.productKey,
+            title: g.title,
+            store: o.store,
+            price: o.price,
+            currency: o.currency || g.currency || "INR",
+          }))
+        );
+        if (offersToRecord.length > 0) {
+          await recordSnapshots(offersToRecord);
+        }
+      } catch (err) {
+        console.error("Background price snapshot recording failed:", err);
+      }
+    });
+  }
+
   return NextResponse.json(result);
 }

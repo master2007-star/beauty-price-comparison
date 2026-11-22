@@ -764,6 +764,22 @@ export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: stri
   return false;
 }
 
+export function normalizeTitleKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/(\d)(ml|g|gm|kg|oz|fl|l)\b/g, "$1 $2")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+export function getProductKey(item: { catalogId?: string | null; title: string }): string {
+  if (item.catalogId && item.catalogId.trim().length > 0) {
+    return item.catalogId.trim();
+  }
+  return normalizeTitleKey(item.title);
+}
+
 /** Drop exact duplicates (same store + same product + same price). */
 export function dedupeOffers(offers: RawOffer[]): RawOffer[] {
   const seen = new Map<string, RawOffer>();
@@ -973,8 +989,11 @@ export function buildGroups(
     const savingsPercent = savingsInfo ? savingsInfo.savingsPercent : 0;
     const bestRated = [...offers].sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0))[0];
     const image = offers.find((o) => o.imageUrl)?.imageUrl ?? null;
+    const catalogId = cluster.find((c) => c.offer.catalogId)?.offer.catalogId ?? null;
+    const productKey = getProductKey({ catalogId, title: cluster[0].offer.title });
     return {
       id: `g${idx + 1}`,
+      productKey,
       title: cluster[0].offer.title,
       imageUrl: image,
       currency,

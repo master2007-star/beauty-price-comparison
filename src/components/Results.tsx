@@ -352,6 +352,149 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
   );
 }
 
+interface PriceHistoryData {
+  points: number;
+  lowest: number | null;
+  highest: number | null;
+  current: number | null;
+  series: Array<{ date: string; price: number }>;
+}
+
+function PriceHistorySection({ group }: { group: ProductGroup }) {
+  const [data, setData] = useState<PriceHistoryData | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!group.productKey) return;
+    const controller = new AbortController();
+    fetch(`/api/price-history?key=${encodeURIComponent(group.productKey)}&days=30`, {
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Price history fetch failed");
+        return res.json();
+      })
+      .then((resData: PriceHistoryData) => {
+        setData(resData);
+        setLoaded(true);
+      })
+      .catch(() => {
+        // Loading and API-error states must hide the block silently.
+        setLoaded(false);
+      });
+    return () => controller.abort();
+  }, [group.productKey]);
+
+  if (!loaded || !data) return null;
+
+  if (data.points < 2) {
+    return (
+      <div
+        className="price-history-card"
+        style={{
+          marginTop: 18,
+          marginBottom: 16,
+          padding: "12px 16px",
+          background: "var(--cream-2, #f9fafb)",
+          border: "1px solid var(--line, #e5e7eb)",
+          borderRadius: "var(--radius-md, 12px)",
+          color: "var(--ink-muted, #6b7280)",
+          fontSize: "0.86rem",
+          lineHeight: 1.4,
+        }}
+      >
+        <div style={{ fontWeight: 600, color: "var(--ink, #111827)", marginBottom: 4 }}>Price history</div>
+        <div>Price history is building — check back after more searches record prices.</div>
+      </div>
+    );
+  }
+
+  const width = 200;
+  const height = 36;
+  const padX = 8;
+  const padY = 6;
+  const graphWidth = width - padX * 2;
+  const graphHeight = height - padY * 2;
+
+  const minPrice = data.lowest ?? 0;
+  const maxPrice = data.highest ?? minPrice;
+  const priceRange = maxPrice > minPrice ? maxPrice - minPrice : 1;
+
+  const pts = data.series.map((pt, i) => {
+    const x = padX + (i / Math.max(1, data.series.length - 1)) * graphWidth;
+    const y =
+      maxPrice === minPrice
+        ? height / 2
+        : padY + graphHeight - ((pt.price - minPrice) / priceRange) * graphHeight;
+    return { x, y };
+  });
+
+  const pointsStr = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+
+  return (
+    <div
+      className="price-history-card"
+      style={{
+        marginTop: 18,
+        marginBottom: 16,
+        padding: "14px 18px",
+        background: "var(--cream-2, #f9fafb)",
+        border: "1px solid var(--line, #e5e7eb)",
+        borderRadius: "var(--radius-md, 12px)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 12,
+          marginBottom: 8,
+        }}
+      >
+        <span
+          style={{
+            fontSize: "0.82rem",
+            fontWeight: 700,
+            letterSpacing: "0.03em",
+            textTransform: "uppercase",
+            color: "var(--ink-muted, #6b7280)",
+          }}
+        >
+          Price history (30 days)
+        </span>
+        <svg
+          width={width}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          style={{ overflow: "visible", flexShrink: 0 }}
+          aria-hidden="true"
+        >
+          <polyline
+            fill="none"
+            stroke="var(--ink, #1f2937)"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={pointsStr}
+          />
+          {pts.length > 0 ? (
+            <>
+              <circle cx={pts[0].x} cy={pts[0].y} r="3" fill="var(--ink, #1f2937)" />
+              <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3" fill="var(--ink, #1f2937)" />
+            </>
+          ) : null}
+        </svg>
+      </div>
+      <div style={{ fontSize: "0.88rem", fontWeight: 500, color: "var(--ink, #111827)" }}>
+        Lowest in 30 days {formatPrice(data.lowest!, group.currency)} · Highest{" "}
+        {formatPrice(data.highest!, group.currency)} · Now {formatPrice(data.current!, group.currency)}
+      </div>
+    </div>
+  );
+}
+
 /** Focused detail view for one product: name, image, variant summary, and
  *  every compared store price with a working store link per row. Opening
  *  the detail fires one live-price refresh for the group's rows; the
@@ -438,6 +581,7 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
             <div className="small muted">Prices are from Google Shopping — the store&rsquo;s live price may differ.</div>
           </div>
         </div>
+        <PriceHistorySection group={group} />
         <StoreRows group={group} showTitles livePrices={livePrices} />
       </div>
       <button type="button" className="btn btn-sm btn-ghost detail-back-bottom" onClick={onBack}>

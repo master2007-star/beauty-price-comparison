@@ -35,6 +35,7 @@ function check(name: string, cond: boolean, detail = "") {
 function group(title: string, lowestLabel: string): ProductGroup {
   return {
     id: title,
+    productKey: title,
     title,
     imageUrl: null,
     currency: "INR",
