@@ -124,6 +124,7 @@ export default function CompareModal({ open, initialQueries, onClose }: CompareM
                     <h3 className="display" style={{ fontSize: "1.2rem", margin: "0 0 10px" }}>
                       Same product found in multiple searches
                     </h3>
+                    <div className="table-scroll">
                     <table className="aligned-table">
                       <thead>
                         <tr>
@@ -145,6 +146,7 @@ export default function CompareModal({ open, initialQueries, onClose }: CompareM
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </>
                 ) : (
                   <p className="muted">

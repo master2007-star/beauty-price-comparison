@@ -10,6 +10,7 @@ import FooterProviders from "@/components/FooterProviders";
 import { getConfig, isGoogleLoginConfigured } from "@/lib/env";
 import { isLockEnabled, isValidSession } from "@/lib/lock";
 import "./globals.css";
+import "./mobile.css";
 
 // Editorial serif display + clean sans body + mono labels, self-hosted at
 // build time by next/font (no runtime font CDN). Exposed as CSS variables

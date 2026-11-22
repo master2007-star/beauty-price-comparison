@@ -180,6 +180,25 @@ export default function HomePage() {
         onClose={() => setCompareOpen(false)}
       />
 
+      {results && results.status === "ok" ? (
+        <div className="mobile-bar" role="navigation" aria-label="Quick actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              document.getElementById("hero-search")?.focus();
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          >
+            New search
+          </button>
+          <button type="button" className="btn btn-terra" onClick={() => setCompareOpen(true)}>
+            Deep compare
+          </button>
+        </div>
+      ) : null}
+
+
       <AiChat geminiConfigured={geminiConfigured} onShowResults={showChatResults} />
     </>
   );
