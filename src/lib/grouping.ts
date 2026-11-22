@@ -826,6 +826,61 @@ export function pickCurrency(offers: RawOffer[], fallback: string): string {
   return best;
 }
 
+export interface GroupSavings {
+  savings: number;
+  savingsLabel: string;
+  savingsPercent: number;
+  comparisonPrice: number;
+  comparisonLabel: string;
+}
+
+/**
+ * Calculates honest savings for a group, excluding extreme outlier prices.
+ *
+ * Excludes prices above 3× the group's median price from the max used for the
+ * saving calculation, so a wild import listing (e.g. ₹6,947.78 GoSupps import
+ * vs ₹600 domestic) does not inflate the saving claim to 91%.
+ * If fewer than 2 prices remain after outlier exclusion, or all remaining prices
+ * come from a single store, no saving is claimed (returns null).
+ */
+export function computeGroupSavings(
+  offers: Array<{ price: number | null; store: string }>,
+  currency: string,
+): GroupSavings | null {
+  const stores = new Set(offers.map((o) => o.store.toLowerCase()));
+  if (stores.size <= 1) return null;
+
+  const prices = offers
+    .map((o) => o.price)
+    .filter((p): p is number => typeof p === "number" && Number.isFinite(p) && p > 0)
+    .sort((a, b) => a - b);
+
+  if (prices.length < 2) return null;
+
+  const mid = Math.floor(prices.length / 2);
+  const median = prices.length % 2 !== 0 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+  const threshold = 3 * median;
+
+  const validPrices = prices.filter((p) => p <= threshold);
+  if (validPrices.length < 2) return null;
+
+  const lowest = validPrices[0];
+  const max = validPrices[validPrices.length - 1];
+  const savings = Math.round((max - lowest) * 100) / 100;
+  if (savings <= 0 || max <= 0) return null;
+
+  const savingsPercent = Math.round((savings / max) * 100);
+  if (savingsPercent <= 0) return null;
+
+  return {
+    savings,
+    savingsLabel: formatPrice(savings, currency),
+    savingsPercent,
+    comparisonPrice: max,
+    comparisonLabel: formatPrice(max, currency),
+  };
+}
+
 export function buildGroups(
   rawOffers: RawOffer[],
   fallbackCurrency: string,
@@ -904,12 +959,9 @@ export function buildGroups(
       deltaLabel: i === 0 ? null : deltaLabel(o.price, lowest, currency),
     }));
     const stores = new Set(offers.map((o) => o.store.toLowerCase()));
-    const savings = Math.round((highest - lowest) * 100) / 100;
-    // A "saving" only exists across stores. A single-store group
-    // with two listings at different prices is not a comparison, so
-    // it reports no saving at all — showing "YOU SAVE 97%" for one
-    // was the fake-saving defect of Nov 2026.
-    const multiStore = stores.size > 1;
+    const savingsInfo = computeGroupSavings(cluster.map((c) => c.offer), currency);
+    const savingsLabel = savingsInfo ? savingsInfo.savingsLabel : formatPrice(0, currency);
+    const savingsPercent = savingsInfo ? savingsInfo.savingsPercent : 0;
     const bestRated = [...offers].sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0))[0];
     const image = offers.find((o) => o.imageUrl)?.imageUrl ?? null;
     return {
@@ -922,8 +974,8 @@ export function buildGroups(
       highestPrice: highest,
       highestLabel: formatPrice(highest, currency),
       storeCount: stores.size,
-      savingsLabel: multiStore ? formatPrice(savings, currency) : formatPrice(0, currency),
-      savingsPercent: multiStore && highest > 0 ? Math.round((savings / highest) * 100) : 0,
+      savingsLabel,
+      savingsPercent,
       rating: bestRated?.rating ?? null,
       reviews: bestRated?.reviews ?? null,
       offers: withFlags,

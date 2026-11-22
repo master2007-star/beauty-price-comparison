@@ -3,7 +3,7 @@
  * No network, no provider keys — pure unit-level checks.
  * Run: npm run check:grouping
  */
-import { buildGroups, dedupeOffers, extractBrand, extractMultipack, extractQueryBrand, extractSize, hasBundleMismatch, hasDistinctiveTokens, isBundleTitle, sizesMatch } from "../src/lib/grouping";
+import { buildGroups, computeGroupSavings, dedupeOffers, extractBrand, extractMultipack, extractQueryBrand, extractSize, hasBundleMismatch, hasDistinctiveTokens, isBundleTitle, sizesMatch } from "../src/lib/grouping";
 import type { RawOffer } from "../src/lib/types";
 
 let failures = 0;
@@ -739,6 +739,58 @@ const compact591 = cetaphilCompact.find((g) => g.offers.some((o) => o.price === 
 check("591ml pair stays together (incl. the Face Wash & Body Wash title)", compact591 !== undefined && compact591.offers.length === 2 && compact591.lowestPrice === 2025 && compact591.highestPrice === 2842, `offers=${compact591?.offers.length}`);
 check("compact: 118ml and 59ml are alone", cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 371.80) && cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 219));
 check("compact: Bright and Acne are alone, bundles are together", cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 841) && cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 1499) && cetaphilCompact.some((g) => g.offers.length === 2 && g.offers.some((o) => o.price === 1018) && g.offers.some((o) => o.price === 1299)));
+
+/* ---------------- saving calculation outlier exclusion ---------------- */
+/* The Ordinary 30ml group had prices: 600, 600, 600, 1172, 1886.29, 1924.14,
+ * 4631.55, 6947.78. Comparing 600 vs 6947.78 produced a bogus 91% saving claim
+ * driven by an extreme import outlier. Prices above 3x the median (median =
+ * 1529.145, 3x = 4587.435) must be excluded from the saving calculation:
+ * 4631.55 and 6947.78 drop out, leaving 1924.14 as the comparison max.
+ * Saving is 1924.14 - 600 = 1324.14 (69%), NOT 91%.
+ * The full price range (600 to 6947.78) stays visible in the group. */
+
+const ordinaryOutlierOffers = [
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store A", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store B", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store C", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store D", price: 1172 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store E", price: 1886.29 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store F", price: 1924.14 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store G", price: 4631.55 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% 30ml", store: "Store H", price: 6947.78 }),
+];
+
+const ordinarySavings = computeGroupSavings(ordinaryOutlierOffers, "INR");
+check(
+  "saving outlier: 3x median excludes 4631.55 and 6947.78 (saving is 69%, not 91%)",
+  ordinarySavings !== null &&
+    ordinarySavings.savingsPercent === 69 &&
+    ordinarySavings.comparisonPrice === 1924.14 &&
+    ordinarySavings.savings === 1324.14,
+  `savingsPercent=${ordinarySavings?.savingsPercent} comparisonPrice=${ordinarySavings?.comparisonPrice}`,
+);
+
+const ordinaryOutlierGroups = buildGroups(dedupeOffers(ordinaryOutlierOffers), "INR", "ordinary");
+check(
+  "saving outlier: buildGroups reflects 69% saving while keeping full 6947.78 highestPrice",
+  ordinaryOutlierGroups.length === 1 &&
+    ordinaryOutlierGroups[0].savingsPercent === 69 &&
+    ordinaryOutlierGroups[0].highestPrice === 6947.78 &&
+    ordinaryOutlierGroups[0].lowestPrice === 600,
+  `groups=${ordinaryOutlierGroups.length} savingsPercent=${ordinaryOutlierGroups[0]?.savingsPercent} highest=${ordinaryOutlierGroups[0]?.highestPrice}`,
+);
+
+// Under 2 prices remaining after 3x median exclusion hides the saving
+const outlierFewRemain = computeGroupSavings([
+  { price: 100, store: "A" },
+  { price: 100, store: "B" },
+  { price: 100, store: "C" },
+  { price: 5000, store: "D" },
+], "INR");
+check(
+  "saving outlier: when fewer than 2 distinct prices remain under threshold, saving is hidden",
+  outlierFewRemain === null || outlierFewRemain.savingsPercent === 0,
+);
 
 console.log(failures === 0 ? "\nAll grouping checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { refreshPrices, resolveLinks } from "@/lib/client-api";
 import { formatPrice } from "@/lib/format";
+import { computeGroupSavings } from "@/lib/grouping";
 import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 
@@ -471,9 +472,22 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
   const selected = view === "groups" && selectedId ? groups.find((g) => g.id === selectedId) ?? null : null;
 
   const best = useMemo(() => {
-    let pick: ProductGroup | null = null;
+    let pick: {
+      group: ProductGroup;
+      savingsLabel: string;
+      savingsPercent: number;
+      comparisonLabel: string;
+    } | null = null;
     for (const g of results.groups) {
-      if (g.savingsPercent > 0 && (!pick || g.savingsPercent > pick.savingsPercent)) pick = g;
+      const s = computeGroupSavings(g.offers, g.currency);
+      if (s && s.savingsPercent > 0 && (!pick || s.savingsPercent > pick.savingsPercent)) {
+        pick = {
+          group: g,
+          savingsLabel: s.savingsLabel,
+          savingsPercent: s.savingsPercent,
+          comparisonLabel: s.comparisonLabel,
+        };
+      }
     }
     return pick;
   }, [results.groups]);
@@ -544,7 +558,7 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
                 <span aria-hidden="true">✦</span>
                 <strong>Biggest saving: {best.savingsLabel} ({best.savingsPercent}%)</strong>
                 <span className="muted small">
-                  on {best.title} — {best.lowestLabel} vs {best.highestLabel} across {best.storeCount} {best.storeCount === 1 ? "store" : "stores"}.
+                  on {best.group.title} — {best.group.lowestLabel} vs {best.comparisonLabel} across {best.group.storeCount} {best.group.storeCount === 1 ? "store" : "stores"}.
                 </span>
               </div>
             ) : null}
