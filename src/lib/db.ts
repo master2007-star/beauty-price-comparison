@@ -1,4 +1,4 @@
-import { sql } from "@vercel/postgres";
+import { createClient, type VercelClient } from "@vercel/postgres";
 
 export interface PriceSnapshotRecord {
   price: number;
@@ -26,14 +26,40 @@ export interface SnapshotOfferInput {
   currency: string;
 }
 
+function getConnectionString(): string | undefined {
+  return (
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.POSTGRES_URL ||
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_PRISMA_URL
+  );
+}
+
 /** Returns true if Postgres connection string is configured. */
 export function isDatabaseConfigured(): boolean {
-  return Boolean(
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.POSTGRES_URL_NON_POOLING ||
-    process.env.DATABASE_URL
-  );
+  return Boolean(getConnectionString());
+}
+
+/**
+ * Safely executes queries using a direct VercelClient.
+ * This supports both direct Neon URLs and pooled URLs without throwing pooler errors.
+ */
+export async function withClient<T>(fn: (client: VercelClient) => Promise<T>): Promise<T> {
+  const connectionString = getConnectionString();
+  if (!connectionString) {
+    throw new Error("Missing Postgres connection string");
+  }
+  const client = createClient({ connectionString });
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    try {
+      await client.end();
+    } catch {
+      // Ignore cleanup error
+    }
+  }
 }
 
 /**
@@ -123,21 +149,23 @@ export async function ensureSchema(): Promise<void> {
   if (!schemaEnsuredPromise) {
     schemaEnsuredPromise = (async () => {
       try {
-        await sql`
-          CREATE TABLE IF NOT EXISTS price_snapshots (
-            id SERIAL PRIMARY KEY,
-            product_key TEXT NOT NULL,
-            title TEXT,
-            store TEXT NOT NULL,
-            price NUMERIC(10,2) NOT NULL,
-            currency TEXT NOT NULL DEFAULT 'INR',
-            recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          )
-        `;
-        await sql`
-          CREATE INDEX IF NOT EXISTS idx_snapshots_key_store_time
-            ON price_snapshots (product_key, store, recorded_at)
-        `;
+        await withClient(async (client) => {
+          await client.sql`
+            CREATE TABLE IF NOT EXISTS price_snapshots (
+              id SERIAL PRIMARY KEY,
+              product_key TEXT NOT NULL,
+              title TEXT,
+              store TEXT NOT NULL,
+              price NUMERIC(10,2) NOT NULL,
+              currency TEXT NOT NULL DEFAULT 'INR',
+              recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+          `;
+          await client.sql`
+            CREATE INDEX IF NOT EXISTS idx_snapshots_key_store_time
+              ON price_snapshots (product_key, store, recorded_at)
+          `;
+        });
       } catch (err) {
         console.error("ensureSchema failed:", err);
         schemaEnsuredPromise = null; // allow retry on next call
@@ -172,11 +200,11 @@ export async function recordSnapshots(offers: SnapshotOfferInput[]): Promise<voi
     const uniqueKeys = [...new Set(Array.from(batchMap.values()).map((o) => o.productKey))];
     const latestPrices = new Map<string, number>();
 
-    // Query latest price for each productKey
-    await Promise.all(
-      uniqueKeys.map(async (key) => {
+    await withClient(async (client) => {
+      // Query latest price for each productKey
+      for (const key of uniqueKeys) {
         try {
-          const { rows } = await sql<{ store: string; price: string | number }>`
+          const { rows } = await client.sql<{ store: string; price: string | number }>`
             SELECT DISTINCT ON (store) store, price
             FROM price_snapshots
             WHERE product_key = ${key}
@@ -189,25 +217,25 @@ export async function recordSnapshots(offers: SnapshotOfferInput[]): Promise<voi
         } catch (queryErr) {
           console.error(`Failed to fetch latest prices for productKey ${key}:`, queryErr);
         }
-      })
-    );
-
-    // Filter to only those whose price changed
-    const toInsert: SnapshotOfferInput[] = [];
-    for (const [pairKey, candidate] of batchMap.entries()) {
-      const lastPrice = latestPrices.get(pairKey);
-      if (shouldRecordSnapshot(lastPrice, candidate.price)) {
-        toInsert.push(candidate);
       }
-    }
 
-    // Insert new snapshots
-    for (const item of toInsert) {
-      await sql`
-        INSERT INTO price_snapshots (product_key, title, store, price, currency, recorded_at)
-        VALUES (${item.productKey}, ${item.title}, ${item.store}, ${item.price}, ${item.currency || "INR"}, NOW())
-      `;
-    }
+      // Filter to only those whose price changed
+      const toInsert: SnapshotOfferInput[] = [];
+      for (const [pairKey, candidate] of batchMap.entries()) {
+        const lastPrice = latestPrices.get(pairKey);
+        if (shouldRecordSnapshot(lastPrice, candidate.price)) {
+          toInsert.push(candidate);
+        }
+      }
+
+      // Insert new snapshots
+      for (const item of toInsert) {
+        await client.sql`
+          INSERT INTO price_snapshots (product_key, title, store, price, currency, recorded_at)
+          VALUES (${item.productKey}, ${item.title}, ${item.store}, ${item.price}, ${item.currency || "INR"}, NOW())
+        `;
+      }
+    });
   } catch (err) {
     console.error("recordSnapshots error:", err);
   }
@@ -238,20 +266,22 @@ export async function getPriceHistory(
     const safeDays = Math.max(1, Math.min(365, days));
     const cutoffDate = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000).toISOString();
 
-    const { rows } = await sql<{ price: string | number; recorded_at: string | Date }>`
-      SELECT price, recorded_at
-      FROM price_snapshots
-      WHERE product_key = ${productKey.trim()}
-        AND recorded_at >= ${cutoffDate}
-      ORDER BY recorded_at ASC
-    `;
+    return await withClient(async (client) => {
+      const { rows } = await client.sql<{ price: string | number; recorded_at: string | Date }>`
+        SELECT price, recorded_at
+        FROM price_snapshots
+        WHERE product_key = ${productKey.trim()}
+          AND recorded_at >= ${cutoffDate}
+        ORDER BY recorded_at ASC
+      `;
 
-    const records: PriceSnapshotRecord[] = rows.map((r) => ({
-      price: Number(r.price),
-      recorded_at: r.recorded_at,
-    }));
+      const records: PriceSnapshotRecord[] = rows.map((r) => ({
+        price: Number(r.price),
+        recorded_at: r.recorded_at,
+      }));
 
-    return computePriceHistorySeries(records);
+      return computePriceHistorySeries(records);
+    });
   } catch (err) {
     console.error(`getPriceHistory error for key ${productKey}:`, err);
     return emptyResult;

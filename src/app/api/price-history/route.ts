@@ -19,15 +19,16 @@ export async function GET(req: Request) {
 
   if (key.trim() === "debug") {
     try {
-      const { sql } = await import("@vercel/postgres");
-      const { ensureSchema } = await import("@/lib/db");
+      const { ensureSchema, withClient } = await import("@/lib/db");
       await ensureSchema();
-      const countRes = await sql`SELECT COUNT(*) FROM price_snapshots`;
-      const sample = await sql`SELECT * FROM price_snapshots ORDER BY id DESC LIMIT 5`;
+      const info = await withClient(async (client) => {
+        const countRes = await client.sql`SELECT COUNT(*) FROM price_snapshots`;
+        const sample = await client.sql`SELECT * FROM price_snapshots ORDER BY id DESC LIMIT 5`;
+        return { count: countRes.rows[0]?.count, sample: sample.rows };
+      });
       return NextResponse.json({
         configured: isDatabaseConfigured(),
-        count: countRes.rows[0]?.count,
-        sample: sample.rows,
+        ...info,
       });
     } catch (err: unknown) {
       const e = err as { message?: string; stack?: string };
