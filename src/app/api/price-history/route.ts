@@ -19,23 +19,28 @@ export async function GET(req: Request) {
 
   if (key.trim() === "debug") {
     try {
-      const { ensureSchema, withClient } = await import("@/lib/db");
-      await ensureSchema();
-      const info = await withClient(async (client) => {
-        const countRes = await client.sql`SELECT COUNT(*) FROM price_snapshots`;
-        const sample = await client.sql`SELECT * FROM price_snapshots ORDER BY id DESC LIMIT 5`;
-        return { count: countRes.rows[0]?.count, sample: sample.rows };
-      });
+      const { getConnectionString } = await import("@/lib/db");
+      const conn = getConnectionString() || "";
+      let host = "none";
+      try {
+        const u = new URL(conn.replace(/^prisma\+/, ""));
+        host = u.hostname;
+      } catch {
+        host = "unparseable";
+      }
+      const relevantEnvVars = Object.keys(process.env).filter((k) =>
+        /POSTGRES|DATABASE|NEON|STORAGE|PRISMA/i.test(k)
+      );
       return NextResponse.json({
         configured: isDatabaseConfigured(),
-        ...info,
+        host,
+        envVars: relevantEnvVars,
       });
     } catch (err: unknown) {
       const e = err as { message?: string; stack?: string };
       return NextResponse.json({
         configured: isDatabaseConfigured(),
         error: e?.message,
-        stack: e?.stack,
       });
     }
   }

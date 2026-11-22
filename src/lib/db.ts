@@ -26,7 +26,7 @@ export interface SnapshotOfferInput {
   currency: string;
 }
 
-function getConnectionString(): string | undefined {
+export function getConnectionString(): string | undefined {
   return (
     process.env.POSTGRES_URL_NON_POOLING ||
     process.env.POSTGRES_URL ||
