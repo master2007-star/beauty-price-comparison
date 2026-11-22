@@ -193,6 +193,8 @@ export interface StatusResponse {
   passcodeSet: boolean;
   /** True when GEMINI_API_KEY is set, i.e. the AI advisor + smart search are available. */
   geminiConfigured: boolean;
+  /** True when POSTGRES_URL is set for price history storage. */
+  databaseConfigured?: boolean;
   providers: Record<
     ProviderId,
     {

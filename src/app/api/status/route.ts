@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConfig, last4 } from "@/lib/env";
 import { isGeminiConfigured } from "@/lib/gemini";
+import { isDatabaseConfigured } from "@/lib/db";
 import { providerHealthSnapshot } from "@/lib/provider-health";
 import type { ProviderId, StatusResponse } from "@/lib/types";
 import { PROVIDER_IDS } from "@/lib/types";
@@ -31,6 +32,7 @@ export async function GET() {
     language: cfg.language,
     passcodeSet: cfg.passcode !== null,
     geminiConfigured: isGeminiConfigured(),
+    databaseConfigured: isDatabaseConfigured(),
     providers,
   };
   return NextResponse.json(body);
