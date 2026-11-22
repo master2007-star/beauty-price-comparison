@@ -857,11 +857,20 @@ export function computeGroupSavings(
 
   if (prices.length < 2) return null;
 
-  const mid = Math.floor(prices.length / 2);
-  const median = prices.length % 2 !== 0 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
-  const threshold = 3 * median;
+  let validPrices: number[];
+  if (prices.length < 3) {
+    const min = prices[0];
+    const max = prices[prices.length - 1];
+    // For small groups (<3 prices), the median is the midpoint so an outlier
+    // drags the median up with it. Use a direct ratio check instead:
+    validPrices = max > 3 * min ? prices.filter((p) => p !== max) : prices;
+  } else {
+    const mid = Math.floor(prices.length / 2);
+    const median = prices.length % 2 !== 0 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+    const threshold = 3 * median;
+    validPrices = prices.filter((p) => p <= threshold);
+  }
 
-  const validPrices = prices.filter((p) => p <= threshold);
   if (validPrices.length < 2) return null;
 
   const lowest = validPrices[0];

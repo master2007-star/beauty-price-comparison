@@ -792,5 +792,28 @@ check(
   outlierFewRemain === null || outlierFewRemain.savingsPercent === 0,
 );
 
+/* Small-group (2-price) ratio checks */
+const smallGroupOutlier = computeGroupSavings([
+  { price: 802.27, store: "Amazon" },
+  { price: 25090, store: "ImportStore" },
+], "INR");
+check(
+  "saving outlier (small group): [802.27, 25090] max > 3x min excludes outlier → null",
+  smallGroupOutlier === null,
+  `got ${JSON.stringify(smallGroupOutlier)}`,
+);
+
+const smallGroupHonest = computeGroupSavings([
+  { price: 600, store: "Nykaa" },
+  { price: 1100, store: "Amazon" },
+], "INR");
+check(
+  "saving outlier (small group): [600, 1100] max <= 3x min reports honest saving (45%)",
+  smallGroupHonest !== null &&
+    smallGroupHonest.savings === 500 &&
+    smallGroupHonest.savingsPercent === 45,
+  `savings=${smallGroupHonest?.savings} savingsPercent=${smallGroupHonest?.savingsPercent}`,
+);
+
 console.log(failures === 0 ? "\nAll grouping checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
