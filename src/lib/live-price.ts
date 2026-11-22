@@ -248,8 +248,9 @@ function isFetchableUrl(raw: string): boolean {
 
 function isGoogleHost(url: string): boolean {
   try {
-    const host = new URL(url).hostname.toLowerCase();
-    return host.endsWith("google.com") || host.endsWith("google.co.in");
+    // Any Google host (google.com, google.co.in, googleadservices.com,
+    // googlesyndication.com): a page served from one is not a store page.
+    return new URL(url).hostname.toLowerCase().includes("google");
   } catch {
     return true;
   }
@@ -399,6 +400,7 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
         productToken: item.productToken,
         productTokens: item.productTokens,
         immersiveTokens: item.immersiveTokens,
+        productUrl: item.productUrl,
         store: item.store,
         price: item.price,
       },

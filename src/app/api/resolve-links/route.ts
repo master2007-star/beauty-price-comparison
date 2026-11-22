@@ -27,9 +27,12 @@ export async function POST(req: Request) {
     Boolean(body.productToken) ||
     (body.productTokens?.length ?? 0) > 0 ||
     (body.immersiveTokens?.length ?? 0) > 0;
-  if (!hasId && !hasToken) {
+  // A Google redirect product URL alone is enough: the resolver can
+  // follow it server-side to the merchant page.
+  const hasLink = Boolean(body.productUrl);
+  if (!hasId && !hasToken && !hasLink) {
     return NextResponse.json(
-      { directUrl: null, matchedStore: null, source: null, reason: "No product id or token provided." },
+      { directUrl: null, matchedStore: null, source: null, reason: "No product id, token or link provided." },
       { status: 200 },
     );
   }

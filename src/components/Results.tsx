@@ -72,11 +72,46 @@ function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
   };
 }
 
-/** Minimal loading page written into the pre-opened tab while the
- *  resolve runs, so the user never stares at a blank about:blank page
- *  while waiting. Inline only — no external assets, no scripts. */
-const LOADING_PAGE_HTML =
-  '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Store khul raha hai…</title><style>body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#F9F2EC;color:#22301A;font-family:system-ui,-apple-system,sans-serif}.spin{width:28px;height:28px;border-radius:50%;border:3px solid #E3D9C8;border-top-color:#E36941;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="spin"></div><div>Store khul raha hai…</div></body></html>';
+/** An absolute http(s) URL with a real host — the only kind of URL
+ *  ever opened from a store button. Empty strings, relative paths
+ *  and non-http(s) schemes never reach window.open: opening an
+ *  empty URL is what left users staring at a blank about:blank tab
+ *  (live Nov 2026: a Nykaa "DIRECT LINK" opened a tab that never
+ *  navigated anywhere). */
+function isOpenableUrl(value: string | null | undefined): value is string {
+  if (!value) return false;
+  try {
+    const u = new URL(value);
+    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** True for any Google host (google.com, google.co.in,
+ *  googleadservices.com, googlesyndication.com): a Google URL is
+ *  never a store page, so it is never labelled or opened as one. */
+function isGoogleUrl(value: string): boolean {
+  try {
+    return new URL(value).hostname.toLowerCase().includes("google");
+  } catch {
+    return false;
+  }
+}
+
+/** True for a real Google Shopping product page — the honest fallback
+ *  destination. A google.com/goto or /aclk redirect is NOT one: it
+ *  goes through Google's bot check and can land on a different
+ *  product, so it must be resolved server-side first, never opened
+ *  as the fallback. */
+function isShoppingProductUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.hostname.toLowerCase().includes("google") && u.pathname.startsWith("/shopping/product");
+  } catch {
+    return false;
+  }
+}
 
 function StoreButton({
   offer,
@@ -92,15 +127,22 @@ function StoreButton({
    *  refresh cap, or when the resolve produced nothing. */
   warmedDirectUrl?: string | null;
 }) {
-  const [state, setState] = useState<"idle" | "checking" | "fallback">("idle");
-  const [direct, setDirect] = useState<string | null>(offer.directUrl);
+  const [state, setState] = useState<"idle" | "checking" | "fallback" | "nolink">("idle");
+  // Only a validated merchant URL counts as a direct link: the
+  // provider's raw value is never trusted blindly.
+  const [direct, setDirect] = useState<string | null>(
+    isOpenableUrl(offer.directUrl) && !isGoogleUrl(offer.directUrl) ? offer.directUrl : null,
+  );
 
   async function go() {
+    // A confirmed merchant link opens synchronously — no await, no
+    // blank tab, no resolve call.
     if (direct) {
       window.open(direct, "_blank", "noopener,noreferrer");
       return;
     }
-    if (warmedDirectUrl) {
+    if (warmedDirectUrl && isOpenableUrl(warmedDirectUrl) && !isGoogleUrl(warmedDirectUrl)) {
+      setDirect(warmedDirectUrl);
       window.open(warmedDirectUrl, "_blank", "noopener,noreferrer");
       return;
     }
@@ -110,20 +152,27 @@ function StoreButton({
       pool.catalogIds.length > 0 ||
       pool.productTokens.length > 0 ||
       pool.immersiveTokens.length > 0;
-    if (!offer.productUrl && !hasIdentity) return;
-    // Open the tab synchronously inside the click gesture: opening it
-    // after the awaited resolve gets blocked as a pop-up (notably by
-    // Android Chrome). The tab is navigated once the link is known, or
-    // closed when there is nothing to open.
-    const tab = window.open("", "_blank", "noopener,noreferrer");
-    if (tab) {
-      try {
-        tab.document.write(LOADING_PAGE_HTML);
-        tab.document.close();
-      } catch {
-        // A tab that refuses the write still navigates below.
-      }
+    // Honest fallback destination: the Google Shopping product page,
+    // or a merchant URL. A Google redirect (/goto, /aclk) is never a
+    // fallback — it is resolved server-side below, and if that fails
+    // no tab opens at all.
+    const fallbackUrl =
+      isOpenableUrl(offer.productUrl) &&
+      (isShoppingProductUrl(offer.productUrl) || !isGoogleUrl(offer.productUrl))
+        ? offer.productUrl
+        : null;
+    const canResolve =
+      hasIdentity ||
+      (isOpenableUrl(offer.productUrl) && isGoogleUrl(offer.productUrl) && !isShoppingProductUrl(offer.productUrl));
+    if (!fallbackUrl && !canResolve) {
+      setState("nolink");
+      return;
     }
+    // Open the tab only when there is already a real page to show in
+    // it. (The old code pre-opened a blank tab and wrote a loading
+    // page into it — the write throws under noopener, which left
+    // users on a dead about:blank tab.)
+    const tab = fallbackUrl ? window.open(fallbackUrl, "_blank", "noopener,noreferrer") : null;
     setState("checking");
     try {
       const res = await resolveLinks({
@@ -134,37 +183,64 @@ function StoreButton({
         productToken: offer.productToken ?? undefined,
         productTokens: pool.productTokens,
         immersiveTokens: pool.immersiveTokens,
+        productUrl: offer.productUrl ?? undefined,
         store: offer.store,
         price: offer.price,
       });
-      if (res.directUrl) {
+      if (res.directUrl && isOpenableUrl(res.directUrl) && !isGoogleUrl(res.directUrl)) {
         setDirect(res.directUrl);
         setState("idle");
-        if (tab) tab.location.href = res.directUrl;
-        else window.open(res.directUrl, "_blank", "noopener,noreferrer");
+        if (tab) {
+          tab.location.href = res.directUrl;
+        } else {
+          // No tab was pre-opened (no fallback page existed): opening
+          // after the await can be pop-up-blocked. The link is saved,
+          // so the next tap opens it synchronously instead.
+          window.open(res.directUrl, "_blank", "noopener,noreferrer");
+        }
         return;
       }
     } catch {
-      // Fall through to the Google Shopping page below.
+      // Fall through to the fallback page below.
     }
-    setState("fallback");
-    if (offer.productUrl) {
-      if (tab) tab.location.href = offer.productUrl;
-      else window.open(offer.productUrl, "_blank", "noopener,noreferrer");
-    } else if (tab) {
-      tab.close();
+    if (fallbackUrl) {
+      // The tab is already on the fallback page (opened above); only
+      // open one when the pre-open was blocked.
+      setState("fallback");
+      if (!tab) window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+      return;
     }
+    // Nothing resolved and no fallback page: no tab was opened, so
+    // there is no dead tab to clean up — say so inline instead.
+    setState("nolink");
   }
 
-  const label = direct ? "Go to Store" : state === "checking" ? "Checking link…" : state === "fallback" ? "Via Google Shopping" : "Go to Store";
+  const label =
+    direct
+      ? "Go to Store"
+      : state === "checking"
+        ? "Checking link…"
+        : state === "fallback"
+          ? "Via Google Shopping"
+          : state === "nolink"
+            ? "No link available"
+            : "Go to Store";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
       {direct ? <span className="flag-direct">Direct link</span> : null}
-      <button type="button" className="btn btn-sm btn-ghost" onClick={go} disabled={state === "checking"}>
+      <button
+        type="button"
+        className="btn btn-sm btn-ghost"
+        onClick={go}
+        disabled={state === "checking" || state === "nolink"}
+      >
         {label}
       </button>
       {state === "fallback" && !direct ? (
         <span className="small muted">No exact store match — opened via Google Shopping.</span>
+      ) : null}
+      {state === "nolink" && !direct ? (
+        <span className="small muted">No store link could be confirmed for this offer.</span>
       ) : null}
     </span>
   );
@@ -300,6 +376,7 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
         productToken: offer.productToken ?? undefined,
         productTokens: pool.productTokens,
         immersiveTokens: pool.immersiveTokens,
+        productUrl: offer.productUrl ?? undefined,
       };
     });
     refreshPrices({ items }, controller.signal)

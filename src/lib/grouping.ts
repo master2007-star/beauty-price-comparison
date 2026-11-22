@@ -2,32 +2,48 @@
  * Same-product grouping.
  *
  * Two offers join one group only when they are the SAME variant of the SAME
- * product:
+ * product — brand, product name and stated variant must ALL agree:
  *  - same Google catalog id, UNLESS their stated variant attributes
  *    conflict: both state a size and the sizes differ beyond tolerance,
  *    both state SPF and it differs, or multipacks differ. A missing
  *    size/SPF on one side does NOT split a catalog-id match — Google
  *    already identifies the product, and one store's shorter title must
- *    not fragment the group.
+ *    not fragment the group. Two different identified brands NEVER
+ *    merge, even with a shared catalog id: a shared id across brands
+ *    is a data error, not an identity.
  *  - otherwise (no shared catalog id): same brand AND strong title
- *    overlap AND same variant signature, with strict size handling (a
- *    missing size splits; sizes must agree within tolerance, with unit
- *    normalisation: 16 fl oz == 473 ml). A query-brand fallback lets a
- *    brand-less title join a group when the search query names the brand
- *    and at least one title carries that brand token — variant
- *    strictness still applies.
+ *    overlap AND same variant signature. A size stated on one side
+ *    only is an omission, not a different variant — the same 30 ml
+ *    serum listed with and without "30ml" in the title is one product
+ *    (live Nov 2026: that split fragmented one serum into three
+ *    1-store cards). Two stated sizes that differ still split, as do
+ *    SPF, multipack and form conflicts. Unit normalisation applies
+ *    (16 fl oz == 473 ml). A query-brand fallback lets a brand-less
+ *    title join a group when the search query names the brand and at
+ *    least one title carries that brand token — variant strictness
+ *    still applies, and the fallback never merges two identified
+ *    brands, nor a listing whose identified brand is not the query
+ *    brand.
  * Title-based matching (both paths above) additionally applies two
  * guards, which never touch catalog-id matching:
  *  - a distinctive-token guard: after dropping brand, form, size/SPF/
  *    unit, claim and stopword tokens, if EACH title keeps a significant
  *    token the other lacks (line names like "strawberry" vs "vitamin"),
  *    the pair does not merge. One-sided extras (retailer noise on one
- *    title only) still merge.
+ *    title only) still merge. Brand tokens themselves are dropped
+ *    here, so brand agreement is enforced by the brand checks, not
+ *    by this guard.
  *  - a bundle guard: a combo/kit/duo title never merges with a single.
  * Anything unsure splits into its own group. Non-English titles split
  * from English ones under the token guard (their native-script words
  * count as distinctive) — sameness across scripts is unverifiable, so
  * splitting is the honest outcome.
+ *
+ * A "saving" is only ever computed across stores: a single-store
+ * group reports no saving at all, however far apart its listings'
+ * prices are — a same-store price spread is not a comparison, and
+ * showing "YOU SAVE 97%" for one was the fake-saving defect of
+ * Nov 2026.
  *
  * Groups are ordered with multi-store groups first (lowest price within
  * each tier), so real comparisons surface before single-store listings.
@@ -148,8 +164,11 @@ export function sizesMatch(a: SizeInfo | null, b: SizeInfo | null): boolean {
 }
 
 export function sameVariant(a: VariantSignature, b: VariantSignature): boolean {
-  // Size: both missing is fine (no size stated anywhere); one missing splits.
-  if ((a.size === null) !== (b.size === null)) return false;
+  // Size: stated sizes must agree; a size stated on one side only is
+  // an omission, not a different variant — one store's shorter title
+  // must not fragment the group (live Nov 2026: the same 30 ml serum
+  // split into three 1-store cards because one listing omitted
+  // "30ml"). Two stated sizes that differ still split.
   if (a.size && b.size && !sizesMatch(a.size, b.size)) return false;
   if (a.multipack !== b.multipack) return false;
   if (a.spf !== b.spf) return false;
@@ -217,13 +236,38 @@ export function titleContainment(a: string, b: string): number {
   return shared / Math.min(ta.size, tb.size);
 }
 
+/**
+ * Multi-word brands whose name starts with "The": the brand token is
+ * the distinctive word, not "the". Without this, "The Ordinary ..."
+ * is brand-less (its first token is a stopword), so the query-brand
+ * fallback merges it with ANY other brand's product — the live
+ * "22 stores compared" mis-grouping of Nov 2026, where Minimalist,
+ * ThriveCo, Pilgrim and The Element listings all joined one
+ * The Ordinary card.
+ */
+const KNOWN_BRAND_PHRASES: Array<[phrase: string, token: string]> = [
+  ["the ordinary", "ordinary"],
+  ["the body shop", "body"],
+  ["the inkey list", "inkey"],
+  ["the derma co", "derma"],
+  ["the face shop", "face"],
+];
+
 export function extractBrand(title: string): string | null {
-  const first = title
+  const squashed = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .split(" ")[0];
-  if (!first || first.length < 2 || STOPWORDS.has(first) || GENERIC_LEAD_WORDS.has(first)) return null;
+    .trim();
+  for (const [phrase, token] of KNOWN_BRAND_PHRASES) {
+    if (squashed === phrase || squashed.startsWith(`${phrase} `)) return token;
+  }
+  const tokens = squashed.split(" ");
+  // Skip leading stopwords: a brand like "The Ordinary" must not be
+  // brand-less just because it starts with "The".
+  let i = 0;
+  while (i < tokens.length && STOPWORDS.has(tokens[i])) i++;
+  const first = tokens[i];
+  if (!first || first.length < 2 || GENERIC_LEAD_WORDS.has(first)) return null;
   return first;
 }
 
@@ -425,11 +469,20 @@ export function statedVariantConflict(a: VariantSignature, b: VariantSignature):
 export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: string | null = null): boolean {
   // Catalog id first: Google's own product identity anchors the match.
   // Only a stated variant conflict (sizes, SPF, multipack) can split it.
+  // Two different identified brands NEVER merge, even with a shared
+  // catalog id: a shared id across brands is a data error, not an
+  // identity.
   const ca = a.offer.catalogId;
   const cb = b.offer.catalogId;
-  if (ca && cb && ca === cb) return !statedVariantConflict(a.variant, b.variant);
+  if (ca && cb && ca === cb) {
+    const ba = extractBrand(a.offer.title);
+    const bb = extractBrand(b.offer.title);
+    if (ba && bb && ba !== bb) return false;
+    return !statedVariantConflict(a.variant, b.variant);
+  }
   // No shared catalog id: strict path — same variant signature, same
-  // brand, strong title overlap. A missing size still splits here.
+  // brand, strong title overlap. A size stated on one side only is an
+  // omission, not a conflict (see sameVariant).
   if (!sameVariant(a.variant, b.variant)) return false;
   // Guards for the title-based paths only: different product lines and
   // bundle-vs-single pairs never merge, however strong the overlap.
@@ -442,13 +495,20 @@ export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: stri
   // least one side has no identifiable brand (a generic lead word like
   // "Moisturizing"). The pair may still match if the query names a brand,
   // at least one title carries that brand token, and title overlap is
-  // strong. Two different identified brands never reach this branch.
-  if (
-    queryBrand &&
-    (extractBrand(a.offer.title) === null || extractBrand(b.offer.title) === null) &&
-    (titleHasToken(a.offer.title, queryBrand) || titleHasToken(b.offer.title, queryBrand))
-  ) {
-    return titleContainment(a.offer.title, b.offer.title) >= 0.5;
+  // strong. Two different identified brands never reach this branch,
+  // and a listing whose identified brand is NOT the query brand never
+  // joins through it either.
+  if (queryBrand) {
+    const ba = extractBrand(a.offer.title);
+    const bb = extractBrand(b.offer.title);
+    if (
+      (ba === null || bb === null) &&
+      (ba === null || ba === queryBrand) &&
+      (bb === null || bb === queryBrand) &&
+      (titleHasToken(a.offer.title, queryBrand) || titleHasToken(b.offer.title, queryBrand))
+    ) {
+      return titleContainment(a.offer.title, b.offer.title) >= 0.5;
+    }
   }
   return false;
 }
@@ -560,6 +620,11 @@ export function buildGroups(
     }));
     const stores = new Set(offers.map((o) => o.store.toLowerCase()));
     const savings = Math.round((highest - lowest) * 100) / 100;
+    // A "saving" only exists across stores. A single-store group
+    // with two listings at different prices is not a comparison, so
+    // it reports no saving at all — showing "YOU SAVE 97%" for one
+    // was the fake-saving defect of Nov 2026.
+    const multiStore = stores.size > 1;
     const bestRated = [...offers].sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0))[0];
     const image = offers.find((o) => o.imageUrl)?.imageUrl ?? null;
     return {
@@ -572,8 +637,8 @@ export function buildGroups(
       highestPrice: highest,
       highestLabel: formatPrice(highest, currency),
       storeCount: stores.size,
-      savingsLabel: formatPrice(savings, currency),
-      savingsPercent: highest > 0 ? Math.round((savings / highest) * 100) : 0,
+      savingsLabel: multiStore ? formatPrice(savings, currency) : formatPrice(0, currency),
+      savingsPercent: multiStore && highest > 0 ? Math.round((savings / highest) * 100) : 0,
       rating: bestRated?.rating ?? null,
       reviews: bestRated?.reviews ?? null,
       offers: withFlags,

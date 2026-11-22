@@ -7,6 +7,10 @@ import { configuredProviders, envVarName, getConfig, type AppConfig } from "./en
 import { defaultCurrencyForRegion } from "./format";
 import { filterBeautyOffers, isBeautyQuery } from "./beauty-filter";
 import { buildGroups, dedupeOffers, extractQueryBrand, flattenOffers } from "./grouping";
+import {
+  isProviderQuotaExhausted,
+  recordProviderResult,
+} from "./provider-health";
 import { PROVIDER_FETCHERS } from "./providers";
 import type {
   AlignedMatch,
@@ -64,8 +68,16 @@ export async function runSearch(query: string, cfg: AppConfig = getConfig()): Pr
     };
   }
 
+  // Skip providers whose monthly quota is known-exhausted (and not
+  // yet due a re-probe): calling them would only return the same 429.
+  // The skip is reported as a provider error so the UI stays honest
+  // about why one source is missing. A successful re-probe clears
+  // the mark automatically.
+  const activeProviders = providers.filter((id) => !isProviderQuotaExhausted(id));
+  const skippedProviders = providers.filter((id) => isProviderQuotaExhausted(id));
+
   const settled = await Promise.allSettled(
-    providers.map(async (id) => ({ id, offers: await PROVIDER_FETCHERS[id](query, cfg) })),
+    activeProviders.map(async (id) => ({ id, offers: await PROVIDER_FETCHERS[id](query, cfg) })),
   );
 
   const offers: RawOffer[] = [];
@@ -75,15 +87,21 @@ export async function runSearch(query: string, cfg: AppConfig = getConfig()): Pr
     if (result.status === "fulfilled") {
       providersUsed.push(result.value.id);
       offers.push(...result.value.offers);
+      recordProviderResult(result.value.id, null);
     } else {
       // Promise.allSettled loses the id on rejection; recover it by index.
       const idx = settled.indexOf(result);
-      const id = providers[idx];
-      providerErrors.push({
-        provider: id,
-        message: result.reason instanceof Error ? result.reason.message : String(result.reason),
-      });
+      const id = activeProviders[idx];
+      const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      providerErrors.push({ provider: id, message });
+      recordProviderResult(id, message);
     }
+  }
+  for (const id of skippedProviders) {
+    providerErrors.push({
+      provider: id,
+      message: "Monthly quota exhausted — searches continue on the other providers.",
+    });
   }
 
   const deduped = dedupeOffers(offers);

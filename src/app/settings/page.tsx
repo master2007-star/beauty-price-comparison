@@ -49,9 +49,14 @@ export default function SettingsPage() {
                 return (
                   <div className="provider-row" key={id}>
                     <span>{PROVIDER_LABELS[id]}</span>
-                    <span className={`pill ${p.configured ? "pill-on" : "pill-off"}`}>
-                      {p.configured ? `configured · …${p.last4}` : "not configured"}
+                    <span className={`pill ${p.live ? "pill-on" : "pill-off"}`}>
+                      {!p.configured
+                        ? "not configured"
+                        : p.live
+                          ? `configured · …${p.last4}`
+                          : "quota exhausted"}
                     </span>
+                    {p.note ? <span className="small muted">{p.note}</span> : null}
                   </div>
                 );
               })}

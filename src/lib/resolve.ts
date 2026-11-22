@@ -8,9 +8,11 @@
  *     path (`/goto?url=...`), NOT a merchant URL, so links are
  *     absolutized against google.com and a name-matching seller's
  *     link is resolved to its merchant destination where possible
- *     (adurl param first, else one redirect follow); when resolution
- *     fails the absolute redirect URL itself is returned, since in
- *     the user's browser it lands on the merchant's product page.
+ *     (adurl param first, else one redirect follow). A redirect that
+ *     cannot be resolved is NEVER returned as a direct link — it
+ *     opened Google's bot-verification interstitial and landed on a
+ *     different product (live Nov 2026); the caller then falls back
+ *     honestly to the Google Shopping page.
  *     This replaced the retired google_product id route, which always
  *     answered "Google Product hasn't returned any results for this
  *     query" and burned a SerpApi credit on every call; no id-based
@@ -21,6 +23,10 @@
  *     are empty and a pooled product/catalog id exists: mints a
  *     product_token from one id (product.product_token), then runs
  *     route 2 with it, unchanged. Never runs before the token routes.
+ *  4. The clicked offer's own product URL, when it is a Google
+ *     redirect — followed server-side to the merchant page where
+ *     possible, after all token/id routes have failed. A Google
+ *     Shopping product page is never followed (it is not a redirect).
  *
  * The client sends a group-wide pool of tokens (the clicked offer's own
  * first, then its group siblings'); identical values collapse to one
@@ -114,10 +120,18 @@ function failureDetail(outcome: FetchOutcome): string {
   return "network/timeout";
 }
 
+/**
+ * Merchant-URL check, mirroring providers.ts: a host counts as Google
+ * when it contains "google" anywhere, which covers google.com,
+ * google.co.in, googleadservices.com and googlesyndication.com. An
+ * endsWith check is NOT enough — googleadservices.com does not end
+ * with "google.com", and treating its ad redirects as merchant URLs
+ * sent users to Google's bot check instead of the store.
+ */
 function isMerchantUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
-    return !host.endsWith("google.com") && !host.endsWith("google.co.in");
+    return !host.includes("google");
   } catch {
     return false;
   }
@@ -309,13 +323,15 @@ async function viaSerpApiImmersive(
       if (!link) { attempt.missingFields += 1; continue; }
       if (!isMerchantUrl(link)) {
         // Google redirect link (the norm for immersive stores): only
-        // consider entries whose name matches the clicked store. Prefer
-        // the resolved merchant URL, but fall back to the redirect URL
-        // itself — in the user's browser it lands on the merchant's
-        // product page, which is the direct-link behaviour. Server-side
-        // follows often fail (Google serves bots an interstitial
-        // instead of redirecting), so a failed follow must not lose a
-        // name-matched seller.
+        // consider entries whose name matches the clicked store, and
+        // only when the redirect resolves to a merchant URL.
+        // Server-side follows often fail (Google serves bots an
+        // interstitial instead of redirecting), and an unresolved
+        // redirect must never be returned as a direct link — it
+        // opens Google's bot check in the user's browser and can
+        // land on a different product (live Nov 2026). A failed
+        // follow loses the entry, not the search: the caller falls
+        // back honestly to the Google Shopping page.
         attempt.googleRedirectLinks += 1;
         if (store && !storesMatch(name, store)) continue;
         attempt.nameMatchedRedirects += 1;
@@ -325,8 +341,14 @@ async function viaSerpApiImmersive(
           finalUrl = await resolveRedirectLink(link);
           if (finalUrl) attempt.redirectsResolved += 1;
         }
+        // A Google redirect that could not be resolved to a merchant
+        // URL is NEVER a direct link: returning it made "Go to Store"
+        // open Google's bot-verification interstitial and land on a
+        // different product (live Nov 2026). Skip the entry instead —
+        // the caller falls back honestly to the Google Shopping page.
+        if (!finalUrl) continue;
         const p = asNumber(r.extracted_price) ?? asNumber(r.price);
-        const hit = evaluateSeller(name, finalUrl ?? link, p, store, undefined, attempt);
+        const hit = evaluateSeller(name, finalUrl, p, store, undefined, attempt);
         if (hit) return { hit, attempt };
         continue;
       }
@@ -516,6 +538,34 @@ function noMatchReason(
   return `None of the ${sellersSeen} seller${sellersSeen === 1 ? "" : "s"} returned matched the clicked store.${failureSuffix}`;
 }
 
+/**
+ * The merchant destination of the clicked offer's own product URL, or
+ * null. A URL that is already a merchant URL is returned as-is; a
+ * Google redirect (/goto, /aclk, /url, or an adurl param) is followed
+ * server-side where possible. A Google Shopping product page or
+ * anything unresolvable returns null — the caller then falls back
+ * honestly instead of opening the redirect. Only redirect-shaped
+ * URLs are ever followed, so a shopping product page never burns a
+ * fetch.
+ */
+async function resolveOfferRedirect(productUrl: string): Promise<string | null> {
+  if (isMerchantUrl(productUrl)) return productUrl;
+  let u: URL;
+  try {
+    u = new URL(productUrl);
+  } catch {
+    return null;
+  }
+  if (!u.hostname.toLowerCase().includes("google")) return null;
+  const looksRedirect =
+    u.pathname.startsWith("/goto") ||
+    u.pathname.startsWith("/aclk") ||
+    u.pathname === "/url" ||
+    u.searchParams.has("adurl");
+  if (!looksRedirect) return null;
+  return resolveRedirectLink(productUrl);
+}
+
 export async function resolveDirectLink(
   req: ResolveLinksRequest,
   cfg: AppConfig,
@@ -552,6 +602,15 @@ export async function resolveDirectLink(
     const r = await viaSearchApiProductPage(ids, req.store, cfg);
     pageAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
+  }
+  // Last: the clicked offer's own product URL, when it is a Google
+  // redirect (Serper/Searlo links often are). Follow it server-side
+  // to the merchant page where possible; when the follow fails
+  // (Google's bot interstitial), the link stays unresolved and the
+  // UI says so instead of opening the redirect.
+  if (req.productUrl) {
+    const resolved = await resolveOfferRedirect(req.productUrl);
+    if (resolved) return { directUrl: resolved, matchedStore: req.store ?? null, source: null };
   }
   return { directUrl: null, matchedStore: null, source: null, reason: noMatchReason(req, cfg, serpAttempt, searchAttempt, pageAttempt) };
 }

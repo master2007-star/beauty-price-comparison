@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AnimatePresence, animate, motion, useInView, useReducedMotion } from "framer-motion";
+import { useEffect, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { PHOTOS } from "./photos";
 import { useMagnetic, useTilt } from "./pointer-motion";
 import RollLabel from "./RollLabel";
+import { fetchStatus } from "@/lib/client-api";
+import { PROVIDER_IDS } from "@/lib/types";
 
 /**
  * Below-fold entrances are TRANSFORM-ONLY (y). Opacity is never animated
@@ -147,66 +149,48 @@ function BentoTile({
 /* ------------------------------ stat cards ------------------------------ */
 
 /**
- * Counts 0 → value once, when the number scrolls into view. The final
- * number is always exactly `value`; under prefers-reduced-motion the final
- * number renders immediately with no animation.
+ * Stat numbers render directly — no count-up animation. The old
+ * animation started at 0 and only counted up when the cards scrolled
+ * into view, so on first load the page read "0 LIVE PRICE SOURCES /
+ * 0 MAJOR STORES" while searches worked fine.
  */
-function CountUp({ value, suffix }: { value: number; suffix?: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const inView = useInView(ref, { once: true, margin: "-40px" });
-  const reduceMotion = useReducedMotion();
-  const [shown, setShown] = useState(0);
-
-  useEffect(() => {
-    if (reduceMotion) {
-      setShown(value);
-      return;
-    }
-    if (!inView) return;
-    const controls = animate(0, value, {
-      duration: 1.4,
-      ease: [0.22, 1, 0.36, 1],
-      onUpdate: (v) => setShown(Math.round(v)),
-    });
-    return () => controls.stop();
-  }, [inView, reduceMotion, value]);
-
-  return (
-    <span ref={ref}>
-      {shown}
-      {suffix ?? ""}
-    </span>
-  );
-}
-
-const STATS = [
-  {
-    value: 4,
-    suffix: "",
-    label: "LIVE PRICE SOURCES",
-    body: "SerpApi, SearchApi.io, Serper and Searlo — every connected key is queried on every search and merged.",
-  },
-  {
-    value: 18,
-    suffix: "",
-    label: "MAJOR STORES TRACKED",
-    body: "Nykaa, Amazon.in, Purplle, Myntra, Flipkart, Tira and more — the results header shows which ones actually listed your product.",
-  },
-  {
-    value: 100,
-    suffix: "%",
-    label: "VARIANT-MATCHED GROUPS",
-    body: "Brand, finish, size and pack must all agree before two listings share a card — a saving is never faked across different products.",
-  },
-];
-
 export function StatsCards() {
   const reduceMotion = useReducedMotion();
+  // Live price sources come from /api/status: only providers whose
+  // key is configured AND whose monthly quota is not exhausted count.
+  // Until the status loads, the number shows "–", never 0.
+  const [liveSources, setLiveSources] = useState<number | null>(null);
+  useEffect(() => {
+    fetchStatus()
+      .then((s) => {
+        setLiveSources(PROVIDER_IDS.filter((id) => s.providers[id]?.live).length);
+      })
+      .catch(() => setLiveSources(null));
+  }, []);
+
+  const stats = [
+    {
+      value: liveSources === null ? "–" : String(liveSources),
+      label: "LIVE PRICE SOURCES",
+      body: "SerpApi, SearchApi.io, Serper and Searlo — every live key is queried on every search and merged.",
+    },
+    {
+      value: "18",
+      label: "MAJOR STORES TRACKED",
+      body: "Nykaa, Amazon.in, Purplle, Myntra, Flipkart, Tira and more — the results header shows which ones actually listed your product.",
+    },
+    {
+      value: "100%",
+      label: "VARIANT-MATCHED GROUPS",
+      body: "Brand, product name and variant must agree before two listings share a card — a saving is never faked across different products.",
+    },
+  ];
+
   return (
     <section className="section section-tight" aria-label="About this comparison">
       <div className="wrap">
         <div className="stat-cards">
-          {STATS.map((stat, i) => (
+          {stats.map((stat, i) => (
             <motion.article
               key={stat.label}
               className="stat-card"
@@ -217,9 +201,7 @@ export function StatsCards() {
               whileHover={reduceMotion ? undefined : { y: -4 }}
               viewport={{ once: true, margin: "-40px" }}
             >
-              <div className="stat-number">
-                <CountUp value={stat.value} suffix={stat.suffix} />
-              </div>
+              <div className="stat-number">{stat.value}</div>
               <div className="stat-tag">{stat.label}</div>
               <p>{stat.body}</p>
             </motion.article>

@@ -127,6 +127,11 @@ export interface ResolveLinksRequest {
   productTokens?: string[];
   /** Pooled SerpApi immersive_product_page_token values from the enclosing group, clicked offer's first. */
   immersiveTokens?: string[];
+  /** The clicked offer's own product URL: when it is a Google redirect
+   *  (/goto, /aclk), the resolver follows it server-side to the
+   *  merchant page where possible. Never a client-invented URL — it
+   *  comes from the provider's own search result. */
+  productUrl?: string;
   store?: string;
   price?: number;
 }
@@ -154,6 +159,10 @@ export interface RefreshPricesItem {
   productTokens?: string[];
   /** Pooled SerpApi immersive_product_page_token values from the enclosing group, clicked offer's first. */
   immersiveTokens?: string[];
+  /** The row's own product URL, from the provider's search result —
+   *  passed through so the resolver can follow a Google redirect to
+   *  the merchant page when the token routes fail. */
+  productUrl?: string;
 }
 
 export interface RefreshPricesResult {
@@ -183,7 +192,21 @@ export interface StatusResponse {
   passcodeSet: boolean;
   /** True when GEMINI_API_KEY is set, i.e. the AI advisor + smart search are available. */
   geminiConfigured: boolean;
-  providers: Record<ProviderId, { configured: boolean; last4: string | null }>;
+  providers: Record<
+    ProviderId,
+    {
+      configured: boolean;
+      last4: string | null;
+      /** Live means: key configured AND not known-quota-exhausted.
+       *  A provider is only marked not-live after a real search
+       *  observed its monthly quota gone; until then it is assumed
+       *  live, so a fresh deploy never claims a working provider
+       *  is dead. */
+      live: boolean;
+      /** Why the provider is not live, or null when it is live. */
+      note: string | null;
+    }
+  >;
 }
 
 /** One turn of an AI advisor conversation. */

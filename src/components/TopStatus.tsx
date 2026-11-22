@@ -61,12 +61,25 @@ export default function TopStatus({ googleConfigured }: { googleConfigured: bool
   useEffect(() => {
     fetchStatus()
       .then((s) => {
-        const on = PROVIDER_IDS.filter((id) => s.providers[id]?.configured);
-        setConnected(on.length > 0);
+        // Live, not merely configured: a provider whose monthly quota
+        // is exhausted is not presented as live until a re-probe
+        // proves its quota is back.
+        const live = PROVIDER_IDS.filter((id) => s.providers[id]?.live);
+        const exhausted = PROVIDER_IDS.filter(
+          (id) => s.providers[id]?.configured && !s.providers[id]?.live,
+        );
+        const anyConfigured = PROVIDER_IDS.some((id) => s.providers[id]?.configured);
+        setConnected(live.length > 0);
         setLine(
-          on.length > 0
-            ? `${on.map((id) => STATUS_LABELS[id]).join(" + ")} CONNECTED`
-            : "NO PROVIDER KEYS CONNECTED",
+          live.length > 0
+            ? `${live.map((id) => STATUS_LABELS[id]).join(" + ")} CONNECTED${
+                exhausted.length > 0
+                  ? ` · ${exhausted.map((id) => STATUS_LABELS[id]).join(" + ")} QUOTA EXHAUSTED`
+                  : ""
+              }`
+            : anyConfigured
+              ? "PROVIDERS CONFIGURED BUT NONE LIVE"
+              : "NO PROVIDER KEYS CONNECTED",
         );
       })
       .catch(() => setLine("PROVIDER STATUS UNAVAILABLE"));

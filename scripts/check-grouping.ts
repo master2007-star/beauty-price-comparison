@@ -3,7 +3,7 @@
  * No network, no provider keys — pure unit-level checks.
  * Run: npm run check:grouping
  */
-import { buildGroups, dedupeOffers, extractQueryBrand, extractSize, hasBundleMismatch, hasDistinctiveTokens, isBundleTitle, sizesMatch } from "../src/lib/grouping";
+import { buildGroups, dedupeOffers, extractBrand, extractQueryBrand, extractSize, hasBundleMismatch, hasDistinctiveTokens, isBundleTitle, sizesMatch } from "../src/lib/grouping";
 import type { RawOffer } from "../src/lib/types";
 
 let failures = 0;
@@ -169,7 +169,7 @@ const noCatalogMissingSize = buildGroups(dedupeOffers([
   offer({ title: "Dot & Key Vitamin C Serum 30 ml", store: "Nykaa", price: 500 }),
   offer({ title: "Dot & Key Vitamin C Serum", store: "Amazon.in", price: 450 }),
 ]), "INR");
-check("missing size without catalogId still splits", noCatalogMissingSize.length === 2, `got ${noCatalogMissingSize.length} groups`);
+check("missing size without catalogId merges when brand + title agree", noCatalogMissingSize.length === 1 && noCatalogMissingSize[0].storeCount === 2, `got ${noCatalogMissingSize.length} groups`);
 
 /* ------------------------- query-brand fallback ------------------------ */
 /* Brand-less titles ("Moisturizing Cream 50ml") can join the group of the
@@ -325,6 +325,55 @@ const hindiVsEnglish = buildGroups(dedupeOffers([
   offer({ title: "Dot & Key विटामिन C + E सुपर ब्राइट सनस्क्रीन इन-वीवो टेस्ट SPF 50+ PA++++ नए एज", store: "amazon.in", price: 499 }),
 ]), "INR");
 check("Hindi title splits from the English title (accepted)", hindiVsEnglish.length === 2, `got ${hindiVsEnglish.length} groups`);
+
+/* ------------------------------ ordering ------------------------------ */
+
+/* ------------- live regressions: Nov 2026 "The Ordinary" search ------------- */
+/* A live search for "The Ordinary Niacinamide 10% + Zinc 1% Serum"
+ * produced two defects at once: the same serum fragmented into three
+ * 1-store cards (₹1,080 Syga / ₹1,100 Amazon / ₹2,200 Amazon), while
+ * a "22 stores compared" card merged Minimalist, ThriveCo, Pilgrim
+ * and The Element listings under a The Ordinary title with a bogus
+ * ₹237–₹7,874 range and a fake "YOU SAVE ₹7,637 (97%)". Root cause:
+ * extractBrand returned null for "The Ordinary ..." (first token
+ * "the" is a stopword), so the query-brand fallback merged it with
+ * any other brand whose title overlapped. */
+
+check("brand extracted from 'The Ordinary ...'", extractBrand("The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml") === "ordinary");
+check("brand extracted from 'The Body Shop ...'", extractBrand("The Body Shop Vitamin E Cream 50 ml") === "body");
+check("brand still null for a generic lead word", extractBrand("Vitamin C Face Serum 30 ml") === null);
+
+const ordinaryVsMinimalist = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 600 }),
+  offer({ title: "Minimalist Niacinamide 10% Serum 30ml", store: "Amazon.in", price: 545 }),
+  offer({ title: "ThriveCo Niacinamide Serum 30ml", store: "Nykaa", price: 379 }),
+  offer({ title: "Pilgrim Niacinamide Serum 30ml", store: "Amazon.in", price: 487 }),
+]), "INR", extractQueryBrand("The Ordinary Niacinamide 10% + Zinc 1% Serum"));
+check("Ordinary vs Minimalist/ThriveCo/Pilgrim split into 4 groups", ordinaryVsMinimalist.length === 4, `got ${ordinaryVsMinimalist.length}: ${ordinaryVsMinimalist.map((g) => g.title.slice(0, 40)).join(" / ")}`);
+
+const ordinaryFragmented = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum", store: "Syga", price: 1080 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Amazon.in", price: 1100 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30 ml", store: "Amazon.in", price: 2200 }),
+]), "INR", extractQueryBrand("The Ordinary Niacinamide 10% + Zinc 1% Serum"));
+check("same Ordinary serum merges across Syga + Amazon despite missing size", ordinaryFragmented.length === 1 && ordinaryFragmented[0].storeCount === 2 && ordinaryFragmented[0].offers.length === 3, `got ${ordinaryFragmented.length} groups`);
+
+const catalogDifferentBrands = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 600, catalogId: "CATB" }),
+  offer({ title: "Minimalist Niacinamide 10% Serum 30ml", store: "Amazon.in", price: 545, catalogId: "CATB" }),
+]), "INR");
+check("shared catalogId never merges different brands", catalogDifferentBrands.length === 2, `got ${catalogDifferentBrands.length} groups`);
+
+const singleStoreSpread = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Amazon.in", price: 1100 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Amazon.in", price: 2200 }),
+]), "INR");
+check("single-store group reports no saving", singleStoreSpread.length === 1 && singleStoreSpread[0].savingsPercent === 0, `got savingsPercent=${singleStoreSpread[0]?.savingsPercent}`);
+const multiStoreSpread = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Amazon.in", price: 1100 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 600 }),
+]), "INR");
+check("multi-store group still reports its saving", multiStoreSpread.length === 1 && multiStoreSpread[0].savingsPercent > 0, `got savingsPercent=${multiStoreSpread[0]?.savingsPercent}`);
 
 /* ------------------------------ ordering ------------------------------ */
 
