@@ -224,12 +224,13 @@ export async function recordSnapshots(offers: SnapshotOfferInput[]): Promise<voi
       // Query latest price for each productKey
       for (const key of uniqueKeys) {
         try {
-          const { rows } = await client.sql<{ store: string; price: string | number }>`
+          const res = await client.sql`
             SELECT DISTINCT ON (store) store, price
             FROM price_snapshots
             WHERE product_key = ${key}
             ORDER BY store, recorded_at DESC
           `;
+          const rows = res.rows as Array<{ store: string; price: string | number }>;
           for (const row of rows) {
             const pairKey = `${key}|${row.store.toLowerCase()}`;
             latestPrices.set(pairKey, Number(row.price));
@@ -287,7 +288,7 @@ export async function getPriceHistory(
     const cutoffDate = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000).toISOString();
 
     return await withClient(async (client) => {
-      const { rows } = await client.sql<{ price: string | number; recorded_at: string | Date }>`
+      const res = await client.sql`
         SELECT price, recorded_at
         FROM price_snapshots
         WHERE product_key = ${productKey.trim()}
@@ -295,7 +296,8 @@ export async function getPriceHistory(
         ORDER BY recorded_at ASC
       `;
 
-      const records: PriceSnapshotRecord[] = rows.map((r) => ({
+      const rows = res.rows as Array<{ price: string | number; recorded_at: string | Date }>;
+      const records: PriceSnapshotRecord[] = rows.map((r: { price: string | number; recorded_at: string | Date }) => ({
         price: Number(r.price),
         recorded_at: r.recorded_at,
       }));
