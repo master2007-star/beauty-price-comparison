@@ -447,7 +447,13 @@ const CLAIM_WORDS = new Set([
   "hydrating", "hydrate", "moisturizing", "nourishing", "nourish",
   "soothing", "soothe", "refreshing", "refresh", "calming",
   "whitening", "lightening", "fairness", "dark", "spot", "pigmentation",
-  "acne", "pimple", "tan", "removal", "remover", "anti", "ageing",
+  // "acne" is deliberately NOT here: it is a line word (Cetaphil Gentle
+  // Acne Cleanser is its own line), and dropping it left that line with
+  // no significant token at all, so the distinctive-token guard could
+  // never split it from any other Cetaphil line (live Nov 2026).
+  // "pimple" stays dropped: same word class, but no live title in this
+  // data names a line with it.
+  "pimple", "tan", "removal", "remover", "anti", "ageing",
   "aging", "wrinkle", "repair", "repairing", "restore", "restoring",
   "renew", "renewal", "rejuvenating", "care", "therapy", "treatment",
   // Audience / skin-type noise. "gentle" is deliberately NOT here: it
@@ -500,6 +506,10 @@ function isDroppedToken(t: string): boolean {
  * variants (-ise/-ize, -our/-or) are normalised so the same product
  * listed with different spellings still merges.
  */
+
+/** Skincare abbreviations that name the same ingredient as the spelled-out form. */
+const ABBREV: Record<string, string> = { sa: "salicylic" };
+
 export function significantTokens(title: string): Set<string> {
   const brand = extractBrand(title);
   const out = new Set<string>();
@@ -507,11 +517,18 @@ export function significantTokens(title: string): Set<string> {
     if (raw.length <= 1) continue;
     if (/^\d/.test(raw)) continue; // sizes/quantities: 50gm, 30ml, 2x, 10%
     if (/^spf\d*$/.test(raw)) continue; // spf50 written without a space
-    const t = raw
+    let t = raw
       .replace(/ising$/, "izing")
       .replace(/ise$/, "ize")
       .replace(/ourite$/, "orite")
       .replace(/our$/, "or");
+    // "SA" is salicylic acid in skincare: "Gentle Exfoliating Sa
+    // Cleanser" is the same product as "Gentle Exfoliating Salicylic
+    // Acid Cleanser". Without this, the token guard sees "sa" and
+    // "salicylic" + "acid" as different lines and splits one product
+    // (live Nov 2026: the DMart spelled-out title would split from the
+    // 1mg "Sa" title under the new seed check below).
+    t = ABBREV[t] ?? t;
     if (t === brand) continue;
     if (isDroppedToken(t)) continue;
     out.add(t);
@@ -550,8 +567,66 @@ const BUNDLE_RES = [
   /\bpack\b(?!\s+of\b)/i,
 ];
 
+/** Body-part words: an "&" between two of these names one product, not two. */
+const BODY_PART_WORDS = new Set([
+  "face", "body", "hair", "hand", "hands", "foot", "feet",
+  "lip", "lips", "cheek", "cheeks",
+]);
+
+/**
+ * "&"-joined two-product titles: "Cleanser 125 Ml & Moisturising
+ * Cream 80 Gm", "Cleanser Pump & Moisturizing Lotion Pump" (live
+ * Nov 2026: both sat inside the Cetaphil catch-all because no
+ * combo/kit/duo word was present). An "&" counts only when it joins
+ * two product phrases — two size mentions, or two distinct form
+ * words. It does NOT count for:
+ *  - "Face & Body Wash" / "Face Wash & Body Wash": the "&" joins two
+ *    body parts, or two phrases of the same form — one product whose
+ *    name spans the "&".
+ *  - "Blemish Control & Pore Minimizing Serum": one serum, one form.
+ *  - "2-in-1 ..." products: one bottle, two functions.
+ * "+" is deliberately NOT treated the same way: "Vitamin C + E" /
+ * "Niacinamide 10% + Zinc 1%" join ingredients, not products.
+ */
+function isAmpersandBundle(title: string): boolean {
+  const amp = title.indexOf("&");
+  if (amp === -1) return false;
+  // One bottle, two functions — never a bundle.
+  if (/\b2\s*-?\s*in\s*-?\s*1\b/i.test(title) || /\btwo in one\b/i.test(title)) return false;
+  // Two size mentions joined by "&" = two products, whatever the words say.
+  const sizeMentions =
+    title.match(/\d+(?:\.\d+)?\s*(?:fl\.?\s*oz|fluid\s*ounces?|oz|ounces?|millilitres?|milliliters?|ml|litres?|liters?|l|kilograms?|kg|grams?|gms?|gm|g|ct|count)\b/gi) ?? [];
+  if (sizeMentions.length >= 2) return true;
+  const beforeWords = title
+    .slice(0, amp)
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+  const afterWords = title
+    .slice(amp + 1)
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+  const before = beforeWords[beforeWords.length - 1];
+  const after = afterWords[0];
+  // "Face & Body Wash": the "&" joins two body parts, not two products.
+  if (before && after && BODY_PART_WORDS.has(before) && BODY_PART_WORDS.has(after)) return false;
+  // "Face Wash & Body Wash": the "&" joins two phrases of the SAME form
+  // (one product type named for two body parts) — not two products.
+  const formsBefore = beforeWords.filter((w) => FORM_WORDS.includes(w));
+  const formsAfter = afterWords.filter((w) => FORM_WORDS.includes(w));
+  if (
+    formsBefore.length > 0 &&
+    formsAfter.length > 0 &&
+    formsBefore[formsBefore.length - 1] === formsAfter[0]
+  ) {
+    return false;
+  }
+  return extractForms(title).size >= 2;
+}
+
 export function isBundleTitle(title: string): boolean {
-  return BUNDLE_RES.some((re) => re.test(title));
+  return BUNDLE_RES.some((re) => re.test(title)) || isAmpersandBundle(title);
 }
 
 /** True when exactly one title is a bundle — a kit never merges with a single. */
@@ -579,6 +654,57 @@ export function statedVariantConflict(a: VariantSignature, b: VariantSignature):
   if (a.spf !== null && b.spf !== null && a.spf !== b.spf) return true;
   if (a.multipack !== b.multipack) return true;
   return false;
+}
+
+/**
+ * Line agreement between a candidate and a cluster's seed (its first
+ * member, which defines the cluster's line). The old join rule only
+ * required the candidate to match ANY member, so a plain title with
+ * no line words of its own ("Cetaphil Gentle Skin Cleanser" keeps
+ * only {gentle}) bridged every Cetaphil line into one catch-all:
+ * each line matched the plain member one-sidedly, and the token
+ * guard never fired on a one-sided pair (live Nov 2026).
+ *
+ * A candidate may join only if it names nothing new vs the seed, or
+ * shares at least two line words with the seed, or states the same
+ * size as the seed. Either side with no line words at all cannot
+ * disagree. Bundle-to-bundle joins skip this check: bundles match by
+ * bundle identity + variant (size/multipack), not by line tokens —
+ * the bundle guard and the veto already constrain them, and a noisy
+ * bundle title ("... Pack Of 2 At Nykaa, Best Beauty Products ...")
+ * would otherwise be blocked from its own bundle group by retailer
+ * noise tokens.
+ */
+export function seedLineAgrees(candidate: PreparedOffer, seed: PreparedOffer): boolean {
+  if (isBundleTitle(candidate.offer.title) && isBundleTitle(seed.offer.title)) return true;
+  const sc = significantTokens(seed.offer.title);
+  const cc = significantTokens(candidate.offer.title);
+  if (sc.size === 0 || cc.size === 0) return true;
+  if ([...cc].every((t) => sc.has(t))) return true;
+  let shared = 0;
+  for (const t of cc) if (sc.has(t)) shared++;
+  if (shared >= 2) return true;
+  const cs = candidate.variant.size;
+  const ss = seed.variant.size;
+  if (cs && ss && sizesMatch(cs, ss)) return true;
+  return false;
+}
+
+/**
+ * A sized listing joining a size-less-seeded cluster must name the
+ * seed's line in full. Without this, a size-stated listing is
+ * absorbed into whichever size-less cluster it matches one-sidedly:
+ * the 118 ml Gentle Skin Cleanser joined the Exfoliating cluster
+ * (its {gentle} is a subset of the seed's tokens), anchored it at
+ * 118 ml, and the clean 118 ml group disappeared (live Nov 2026).
+ * Bundle-to-bundle joins skip this check (see seedLineAgrees).
+ */
+export function sizeLineOk(candidate: PreparedOffer, seed: PreparedOffer): boolean {
+  if (isBundleTitle(candidate.offer.title) && isBundleTitle(seed.offer.title)) return true;
+  if (candidate.variant.size === null || seed.variant.size !== null) return true;
+  const sc = significantTokens(seed.offer.title);
+  const cc = significantTokens(candidate.offer.title);
+  return [...sc].every((t) => cc.has(t));
 }
 
 export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: string | null = null): boolean {
@@ -730,14 +856,27 @@ export function buildGroups(
     // product can each keep a token the other lacks, and they still
     // belong together — the guard already runs on the admitting pair
     // in offersMatch.)
-    // When several clusters qualify, the candidate joins the LARGEST
-    // one: an underspecified listing most likely is the majority
-    // variant it matches, not whichever cluster happened to form
-    // first. Ties keep the earliest cluster, so grouping stays
-    // deterministic.
-    let best: PreparedOffer[] | null = null;
+    // Two more conditions, both against the cluster's SEED (its first
+    // member, which defines the cluster's line) — see seedLineAgrees
+    // and sizeLineOk. Without them, a plain title with no line words
+    // of its own bridges every line into one catch-all, and a
+    // size-stated listing is absorbed into a size-less cluster of a
+    // different line (live Nov 2026: the Cetaphil catch-all).
+    // When several clusters qualify, the candidate joins the FIRST
+    // one (in cluster-creation order). The previous largest-cluster
+    // rule snowballed instead: a plain title qualifies for several
+    // clusters at once, so it piled into whichever was biggest — with
+    // the seed checks in place the Foaming cluster still grew to 17
+    // offers in the replay. First-match keeps grouping deterministic
+    // and order-stable, and no existing check relies on largest: the
+    // Ordinary no-size listing seeds its cluster (it arrives first),
+    // it does not join by size.
+    let target: PreparedOffer[] | null = null;
     for (const cluster of clusters) {
+      const seed = cluster[0];
       if (
+        seedLineAgrees(candidate, seed) &&
+        sizeLineOk(candidate, seed) &&
         cluster.some((member) => offersMatch(candidate, member, queryBrand)) &&
         cluster.every(
           (member) =>
@@ -745,10 +884,11 @@ export function buildGroups(
             !hasBundleMismatch(candidate.offer.title, member.offer.title),
         )
       ) {
-        if (best === null || cluster.length > best.length) best = cluster;
+        target = cluster;
+        break;
       }
     }
-    if (best !== null) best.push(candidate);
+    if (target !== null) target.push(candidate);
     else clusters.push([candidate]);
   }
 

@@ -576,9 +576,11 @@ check("Foaming Cream Cleanser vs Gentle Skin Cleanser splits (no catalogId)", ce
  * member, so the 60ml joined through the size-less one), and the
  * bundle shared the serum's catalog id, where the guards never
  * applied. The fix: a candidate joins only when it conflicts with NO
- * member of the cluster; and among qualifying clusters it joins the
- * largest (the majority variant is the best evidence for an
- * underspecified listing). */
+ * member of the cluster. (The "joins the largest qualifying cluster"
+ * half of this fix was superseded in the Cetaphil catch-all fix:
+ * largest snowballed plain titles into the biggest cluster, so the
+ * join now takes the FIRST qualifying cluster — the no-size listing
+ * here seeds its cluster, it does not join by size.) */
 
 const ordinarySizeBridge = buildGroups(dedupeOffers([
   offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 600 }),
@@ -617,6 +619,126 @@ const countShape = buildGroups(dedupeOffers([
   offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 620 }),
 ]), "INR");
 check("one store can hold two prices: storeCount 2, offers 3", countShape.length === 1 && countShape[0].storeCount === 2 && countShape[0].offers.length === 3, `stores=${countShape[0]?.storeCount} offers=${countShape[0]?.offers.length}`);
+/* ------------- live regression: Nov 2026 Cetaphil no-size catch-all ------------- */
+/* A live search (2026-11-22) for "Cetaphil Gentle Skin Cleanser" returned
+ * a 24-offer catch-all (20 stores, ₹99–₹2,321.42) mixing Exfoliating SA,
+ * Foaming, Bright Healthy Radiance, Gentle Acne and two "&" two-product
+ * titles, plus a size-less FirstCry ₹161 "Hydrating Foaming Cream
+ * Cleanser" inside it. Root cause, found by replaying the real titles:
+ *  (a) plain titles keep only {gentle}, so they bridge every line — the
+ *      token guard only fires when EACH side keeps a token the other
+ *      lacks, and a candidate only had to match ANY cluster member;
+ *  (b) the two "&" titles escaped the bundle guard (no combo/kit/duo
+ *      word), and the 125ml one anchored the catch-all: its stated
+ *      size made the veto repel every other size-stated listing;
+ *  (c) "acne" was a dropped claim word, so the Acne line had no
+ *      significant token at all;
+ *  (d) "Sa" and "Salicylic Acid" were different tokens, so one product
+ *      would split under the new seed check.
+ * The fix: "&"-bundle detection; "acne" rescued as a line word;
+ * "sa" -> "salicylic"; a candidate must agree with the cluster SEED
+ * (seedLineAgrees) and a sized listing joining a size-less-seeded
+ * cluster must name the seed's line in full (sizeLineOk); and the
+ * join takes the FIRST qualifying cluster, not the largest — largest
+ * snowballed the plain titles into whichever cluster was biggest
+ * (Foaming, 17 offers in the replay) even with the seed checks. */
+
+check("Acne is a line word: Gentle Acne splits from Exfoliating Sa", hasDistinctiveTokens("Cetaphil Gentle Acne Cleanser", "Cetaphil Gentle Exfoliating Sa Cleanser"));
+check("Sa is salicylic acid: Exfoliating Sa does not split from Salicylic Acid", !hasDistinctiveTokens("Cetaphil Gentle Exfoliating Sa Cleanser", "Cetaphil Gentle Exfoliating Salicylic Acid Cleanser"));
+check("Foaming splits from Exfoliating Sa", hasDistinctiveTokens("Cetaphil Gentle Foaming Cleanser", "Cetaphil Gentle Exfoliating Sa Cleanser"));
+check("Foaming splits from Bright Healthy Radiance", hasDistinctiveTokens("Cetaphil Gentle Foaming Cleanser", "Cetaphil Bright Healthy Radiance Gentle Renewing Cleanser"));
+
+check("ampersand bundle detected: two sizes + two forms", isBundleTitle("Cetaphil Gentle Skin Cleanser 125 Ml & Moisturising Cream 80 Gm") && isBundleTitle("Cetaphil Gentle Skin Cleanser Pump & Moisturizing Lotion Pump"));
+check("ampersand bundle detected: two forms, no size", isBundleTitle("Shampoo & Conditioner") && isBundleTitle("Cleanser & Toner") && isBundleTitle("Niacinamide Serum 30ml & Hyaluronic Serum 30ml"));
+check("ampersand is NOT a bundle: body parts", !isBundleTitle("Cetaphil Gentle Face & Body Wash 59ml") && !isBundleTitle("Cetaphil Gentle Skin Cleanser 20 fl oz | Hydrating Face Wash & Body Wash | Ideal For Sensitive, Dry Skin | Non-irritating | Wont Clog Pores |"));
+check("ampersand is NOT a bundle: one product, two functions", !isBundleTitle("2-in-1 Shampoo & Conditioner") && !isBundleTitle("Blemish Control & Pore Minimizing Serum"));
+check("plus is NOT a bundle: ingredients", !isBundleTitle("The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml"));
+
+const saPair = buildGroups(dedupeOffers([
+  offer({ title: "Cetaphil Gentle Exfoliating Sa Cleanser", store: "Nykaa", price: 99 }),
+  offer({ title: "Cetaphil Gentle Exfoliating Salicylic Acid Cleanser", store: "DMart Ready", price: 1000 }),
+]), "INR", extractQueryBrand("Cetaphil Gentle Exfoliating Sa Cleanser"));
+check("Sa and Salicylic Acid are one product", saPair.length === 1, `got ${saPair.length} groups`);
+const acneSplit = buildGroups(dedupeOffers([
+  offer({ title: "Cetaphil Gentle Acne Cleanser", store: "Nutraog", price: 1499 }),
+  offer({ title: "Cetaphil Gentle Exfoliating Sa Cleanser", store: "1mg", price: 99 }),
+]), "INR", extractQueryBrand("Cetaphil Gentle Acne Cleanser"));
+check("Gentle Acne splits from Exfoliating Sa", acneSplit.length === 2, `got ${acneSplit.length} groups`);
+
+/* The 24 offers of the live catch-all, verbatim from the 2026-11-22 search. */
+const catchall24 = buildGroups(dedupeOffers([
+  offer({ title: "Cetaphil Gentle Exfoliating Sa Cleanser Sensitive Skin", store: "1mg", price: 99 }),
+  offer({ title: "Cetaphil Gentle Exfoliating SA Cleanser", store: "Purplle.com", price: 99 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Tinygrasp", price: 199 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Purplle.com - Beauty Online", price: 399 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Purplle.com - Purplle Beauty Shop", price: 399 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Purplle.com - Purplle Shopping", price: 399 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Nykaa", price: 663 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser For Dry To Normal Sensitive Skin", store: "1mg", price: 735 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Vyloo", price: 775.03 }),
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser", store: "JioMart Grocery", price: 818 }),
+  offer({ title: "Cetaphil Bright Healthy Radiance Gentle Renewing Cleanser", store: "Myntra - MNow", price: 841 }),
+  offer({ title: "Cetaphil Daily Exfoliating Cleanser", store: "PharmEasy", price: 857.22 }),
+  offer({ title: "Cetaphil Gentle Foaming Cleanser", store: "Zepto", price: 881 }),
+  offer({ title: "Old Version Cetaphil Gentle Foaming Cleanser", store: "Indicrest.com", price: 899 }),
+  offer({ title: "Cetaphil Gentle Foaming Cleanser Normal to Dry Skin", store: "Apollo247", price: 945 }),
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser", store: "Tira", price: 977 }),
+  offer({ title: "Cetaphil Gentle Exfoliating Salicylic Acid Cleanser", store: "DMart Ready", price: 1000 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 125 Ml & Moisturising Cream 80 Gm", store: "amazon.in", price: 1018 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "PharmEasy", price: 1026.21 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "PharmEasy", price: 1272.33 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser Pump & Moisturizing Lotion Pump", store: "amazon.in", price: 1299 }),
+  offer({ title: "Cetaphil Gentle Acne Cleanser", store: "Nutraog", price: 1499 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Nykaa Now", price: 1690 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser Sensitive Skin", store: "drnutrition.com", price: 2321.42 }),
+]), "INR", extractQueryBrand("Cetaphil Gentle Skin Cleanser"));
+check("catch-all splits into 5 groups, not 1", catchall24.length === 5, `got ${catchall24.length} groups`);
+const catchallExfoliating = catchall24.find((g) => g.offers.some((o) => o.price === 99 && o.store === "1mg"));
+check("catch-all Exfoliating family: 15 offers, 12 stores", catchallExfoliating !== undefined && catchallExfoliating.offers.length === 15 && catchallExfoliating.storeCount === 12, `offers=${catchallExfoliating?.offers.length} stores=${catchallExfoliating?.storeCount}`);
+const catchallFoaming = catchall24.find((g) => g.offers.some((o) => o.price === 945 && o.store === "Apollo247"));
+check("catch-all Foaming family: 5 offers, 5 stores, ₹818–₹977", catchallFoaming !== undefined && catchallFoaming.offers.length === 5 && catchallFoaming.storeCount === 5 && catchallFoaming.lowestPrice === 818 && catchallFoaming.highestPrice === 977, `offers=${catchallFoaming?.offers.length} stores=${catchallFoaming?.storeCount} range=${catchallFoaming?.lowestPrice}–${catchallFoaming?.highestPrice}`);
+const catchallBundles = catchall24.find((g) => g.offers.some((o) => o.price === 1018));
+check("catch-all '&' bundles: 2 offers, 1 store", catchallBundles !== undefined && catchallBundles.offers.length === 2 && catchallBundles.storeCount === 1, `offers=${catchallBundles?.offers.length} stores=${catchallBundles?.storeCount}`);
+check("catch-all Bright and Acne are alone", catchall24.some((g) => g.offers.length === 1 && g.offers[0].price === 841) && catchall24.some((g) => g.offers.length === 1 && g.offers[0].price === 1499));
+
+/* Compact cross-line fixture: the ₹161 FirstCry title (from the browser
+ * check — it was inside the live catch-all), the 1L group, the 591ml
+ * pair, the 118ml and 59ml singles. All titles verbatim from the live
+ * search except the FirstCry ₹161 offer, which is the browser-check
+ * title. The Apollo247 Foaming ₹945 offer must come before the
+ * Hydrating Foaming offers so the Foaming cluster seeds with the
+ * superset tokens {gentle, foaming}: if Hydrating Foaming ({foaming})
+ * seeds first, Gentle Foaming titles are blocked by seedLineAgrees
+ * and split off. */
+const cetaphilCompact = buildGroups(dedupeOffers([
+  offer({ title: "Cetaphil Gentle Exfoliating Sa Cleanser Sensitive Skin", store: "1mg", price: 99 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Nykaa", price: 663 }),
+  offer({ title: "Cetaphil Daily Exfoliating Cleanser", store: "PharmEasy", price: 857.22 }),
+  offer({ title: "Cetaphil Gentle Exfoliating Salicylic Acid Cleanser", store: "DMart Ready", price: 1000 }),
+  offer({ title: "Cetaphil Gentle Foaming Cleanser Normal to Dry Skin", store: "Apollo247", price: 945 }),
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser", store: "FirstCry India", price: 161 }),
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser", store: "JioMart Grocery", price: 818 }),
+  offer({ title: "Cetaphil Gentle Foaming Cleanser", store: "Zepto", price: 881 }),
+  offer({ title: "Cetaphil Bright Healthy Radiance Gentle Renewing Cleanser", store: "Myntra - MNow", price: 841 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 125 Ml & Moisturising Cream 80 Gm", store: "amazon.in", price: 1018 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser Pump & Moisturizing Lotion Pump", store: "amazon.in", price: 1299 }),
+  offer({ title: "Cetaphil Gentle Acne Cleanser", store: "Nutraog", price: 1499 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 1 L", store: "Apollo247", price: 1519.20 }),
+  offer({ title: "Cetaphil White Gentle Skin Cleanser for Dry Normal Sensitive Skin 1000 ml", store: "Indya", price: 4415 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser | 591ml | Dry to Normal, Sensitive Skin", store: "Baby's World", price: 2025 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 20 fl oz | Hydrating Face Wash & Body Wash | Ideal For Sensitive, Dry Skin | Non-irritating | Wont Clog Pores |", store: "ubuy.co.in", price: 2842 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 118 ml", store: "Apollo247", price: 371.80 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 59ml Hydrating Face & Body Wash for Sensitive Dry Skin Soap-Free", store: "1mg", price: 219 }),
+]), "INR", extractQueryBrand("Cetaphil Gentle Skin Cleanser"));
+check("compact Cetaphil fixture: 9 groups", cetaphilCompact.length === 9, `got ${cetaphilCompact.length} groups`);
+const compactFoaming = cetaphilCompact.find((g) => g.offers.some((o) => o.price === 161));
+check("₹161 FirstCry title lands with Foaming, not the catch-all", compactFoaming !== undefined && compactFoaming.offers.length === 4 && compactFoaming.lowestPrice === 161 && compactFoaming.highestPrice === 945, `offers=${compactFoaming?.offers.length} range=${compactFoaming?.lowestPrice}–${compactFoaming?.highestPrice}`);
+const compact1L = cetaphilCompact.find((g) => g.offers.some((o) => o.price === 1519.20));
+check("1L group is clean: 2 offers, no Bright/Acne", compact1L !== undefined && compact1L.offers.length === 2 && compact1L.lowestPrice === 1519.20 && compact1L.highestPrice === 4415, `offers=${compact1L?.offers.length} range=${compact1L?.lowestPrice}–${compact1L?.highestPrice}`);
+const compact591 = cetaphilCompact.find((g) => g.offers.some((o) => o.price === 2025));
+check("591ml pair stays together (incl. the Face Wash & Body Wash title)", compact591 !== undefined && compact591.offers.length === 2 && compact591.lowestPrice === 2025 && compact591.highestPrice === 2842, `offers=${compact591?.offers.length}`);
+check("compact: 118ml and 59ml are alone", cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 371.80) && cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 219));
+check("compact: Bright and Acne are alone, bundles are together", cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 841) && cetaphilCompact.some((g) => g.offers.length === 1 && g.offers[0].price === 1499) && cetaphilCompact.some((g) => g.offers.length === 2 && g.offers.some((o) => o.price === 1018) && g.offers.some((o) => o.price === 1299)));
 
 console.log(failures === 0 ? "\nAll grouping checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
