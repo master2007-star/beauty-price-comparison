@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/guard";
-import { getPriceHistory } from "@/lib/db";
+import { getPriceHistory, isDatabaseConfigured } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
