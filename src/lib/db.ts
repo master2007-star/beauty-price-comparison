@@ -31,7 +31,8 @@ export function isDatabaseConfigured(): boolean {
   return Boolean(
     process.env.POSTGRES_URL ||
     process.env.POSTGRES_PRISMA_URL ||
-    process.env.POSTGRES_URL_NON_POOLING
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.DATABASE_URL
   );
 }
 
@@ -131,11 +132,11 @@ export async function ensureSchema(): Promise<void> {
             price NUMERIC(10,2) NOT NULL,
             currency TEXT NOT NULL DEFAULT 'INR',
             recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
+          )
         `;
         await sql`
           CREATE INDEX IF NOT EXISTS idx_snapshots_key_store_time
-            ON price_snapshots (product_key, store, recorded_at);
+            ON price_snapshots (product_key, store, recorded_at)
         `;
       } catch (err) {
         console.error("ensureSchema failed:", err);

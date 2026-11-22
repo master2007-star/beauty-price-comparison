@@ -22,5 +22,7 @@ export async function GET(req: Request) {
   const safeDays = Number.isFinite(days) && days > 0 ? days : 30;
 
   const history = await getPriceHistory(key.trim(), safeDays);
-  return NextResponse.json(history);
+  const res = NextResponse.json(history);
+  res.headers.set("x-db-configured", String(isDatabaseConfigured()));
+  return res;
 }
