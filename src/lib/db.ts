@@ -1,4 +1,4 @@
-import { createClient, type VercelClient } from "@vercel/postgres";
+import { createClient, createPool } from "@vercel/postgres";
 
 export interface PriceSnapshotRecord {
   price: number;
@@ -27,9 +27,25 @@ export interface SnapshotOfferInput {
 }
 
 export function getConnectionString(): string | undefined {
+  // First preference: Neon non-pooling direct connection
+  if (process.env.HI98_POSTGRES_URL_NON_POOLING) return process.env.HI98_POSTGRES_URL_NON_POOLING;
+  if (process.env.POSTGRES_URL_NON_POOLING && !process.env.POSTGRES_URL_NON_POOLING.includes("prisma.io")) {
+    return process.env.POSTGRES_URL_NON_POOLING;
+  }
+  // Second preference: Neon pooled connection
+  if (process.env.HI98_POSTGRES_URL) return process.env.HI98_POSTGRES_URL;
+  if (process.env.HI98_DATABASE_URL) return process.env.HI98_DATABASE_URL;
+
+  // Third: any non-prisma postgres url
+  const anyPostgresKey = Object.keys(process.env).find(
+    (k) => /POSTGRES_URL/i.test(k) && process.env[k] && !process.env[k]!.includes("prisma.io")
+  );
+  if (anyPostgresKey && process.env[anyPostgresKey]) return process.env[anyPostgresKey];
+
+  // Fallback
   return (
-    process.env.POSTGRES_URL_NON_POOLING ||
     process.env.POSTGRES_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
     process.env.DATABASE_URL ||
     process.env.POSTGRES_PRISMA_URL
   );
@@ -41,23 +57,27 @@ export function isDatabaseConfigured(): boolean {
 }
 
 /**
- * Safely executes queries using a direct VercelClient.
- * This supports both direct Neon URLs and pooled URLs without throwing pooler errors.
+ * Safely executes queries using either createPool (for pooled URLs) or createClient (for direct URLs).
  */
-export async function withClient<T>(fn: (client: VercelClient) => Promise<T>): Promise<T> {
+export async function withClient<T>(fn: (client: { sql: any }) => Promise<T>): Promise<T> {
   const connectionString = getConnectionString();
   if (!connectionString) {
     throw new Error("Missing Postgres connection string");
   }
-  const client = createClient({ connectionString });
-  await client.connect();
-  try {
-    return await fn(client);
-  } finally {
+  if (connectionString.includes("-pooler")) {
+    const pool = createPool({ connectionString });
+    return await fn(pool);
+  } else {
+    const client = createClient({ connectionString });
+    await client.connect();
     try {
-      await client.end();
-    } catch {
-      // Ignore cleanup error
+      return await fn(client);
+    } finally {
+      try {
+        await client.end();
+      } catch {
+        // Ignore cleanup error
+      }
     }
   }
 }
