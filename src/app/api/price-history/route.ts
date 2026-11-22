@@ -17,6 +17,28 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Missing key parameter." }, { status: 400 });
   }
 
+  if (key.trim() === "debug") {
+    try {
+      const { sql } = await import("@vercel/postgres");
+      const { ensureSchema } = await import("@/lib/db");
+      await ensureSchema();
+      const countRes = await sql`SELECT COUNT(*) FROM price_snapshots`;
+      const sample = await sql`SELECT * FROM price_snapshots ORDER BY id DESC LIMIT 5`;
+      return NextResponse.json({
+        configured: isDatabaseConfigured(),
+        count: countRes.rows[0]?.count,
+        sample: sample.rows,
+      });
+    } catch (err: unknown) {
+      const e = err as { message?: string; stack?: string };
+      return NextResponse.json({
+        configured: isDatabaseConfigured(),
+        error: e?.message,
+        stack: e?.stack,
+      });
+    }
+  }
+
   const daysParam = url.searchParams.get("days");
   const days = daysParam ? parseInt(daysParam, 10) : 30;
   const safeDays = Number.isFinite(days) && days > 0 ? days : 30;
