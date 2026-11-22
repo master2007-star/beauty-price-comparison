@@ -5,7 +5,9 @@
  * product — brand, product name and stated variant must ALL agree:
  *  - same Google catalog id, UNLESS their stated variant attributes
  *    conflict: both state a size and the sizes differ beyond tolerance,
- *    both state SPF and it differs, or multipacks differ. A missing
+ *    both state SPF and it differs, or multipacks differ — or the
+ *    titles disagree about the product itself (bundle vs single, or
+ *    two different product lines; see the guards below). A missing
  *    size/SPF on one side does NOT split a catalog-id match — Google
  *    already identifies the product, and one store's shorter title must
  *    not fragment the group. Two different identified brands NEVER
@@ -24,8 +26,9 @@
  *    still applies, and the fallback never merges two identified
  *    brands, nor a listing whose identified brand is not the query
  *    brand.
- * Title-based matching (both paths above) additionally applies two
- * guards, which never touch catalog-id matching:
+ * Two guards apply on BOTH paths (catalog-id and title-based): a shared
+ * catalog id anchors the match, but it is not proof of identity when
+ * the titles disagree about the product itself —
  *  - a distinctive-token guard: after dropping brand, form, size/SPF/
  *    unit, claim and stopword tokens, if EACH title keeps a significant
  *    token the other lacks (line names like "strawberry" vs "vitamin"),
@@ -34,6 +37,9 @@
  *    here, so brand agreement is enforced by the brand checks, not
  *    by this guard.
  *  - a bundle guard: a combo/kit/duo title never merges with a single.
+ * (Live Nov 2026: a Glycolic + Niacinamide bundle shared the serum's
+ * catalog id and merged into its group, because the guards never
+ * touched catalog-id matching.)
  * Anything unsure splits into its own group. Non-English titles split
  * from English ones under the token guard (their native-script words
  * count as distinctive) — sameness across scripts is unverifiable, so
@@ -444,8 +450,12 @@ const CLAIM_WORDS = new Set([
   "acne", "pimple", "tan", "removal", "remover", "anti", "ageing",
   "aging", "wrinkle", "repair", "repairing", "restore", "restoring",
   "renew", "renewal", "rejuvenating", "care", "therapy", "treatment",
-  // Audience / skin-type noise
-  "skin", "types", "type", "all", "sun", "daily", "everyday", "gentle",
+  // Audience / skin-type noise. "gentle" is deliberately NOT here: it
+  // is a line word (Cetaphil Gentle Skin Cleanser), and dropping it left
+  // that line with no significant token at all, so the distinctive-token
+  // guard could never split it from the Foaming Cream Cleanser line
+  // (live Nov 2026).
+  "skin", "types", "type", "all", "sun", "daily", "everyday",
   "mild", "sensitive", "normal", "oily", "dry", "combination",
   "men", "women", "woman", "baby", "babies", "kids", "kid", "unisex",
   // Generic marketing / retailer noise
@@ -573,16 +583,25 @@ export function statedVariantConflict(a: VariantSignature, b: VariantSignature):
 
 export function offersMatch(a: PreparedOffer, b: PreparedOffer, queryBrand: string | null = null): boolean {
   // Catalog id first: Google's own product identity anchors the match.
-  // Only a stated variant conflict (sizes, SPF, multipack) can split it.
-  // Two different identified brands NEVER merge, even with a shared
-  // catalog id: a shared id across brands is a data error, not an
-  // identity.
+  // A stated variant conflict (sizes, SPF, multipack) can split it,
+  // and so can the bundle / distinctive-token guards: a shared id is
+  // not proof of identity when the titles name a bundle vs a single,
+  // or two different product lines. Two different identified brands
+  // NEVER merge, even with a shared catalog id: a shared id across
+  // brands is a data error, not an identity.
   const ca = a.offer.catalogId;
   const cb = b.offer.catalogId;
   if (ca && cb && ca === cb) {
     const ba = extractBrand(a.offer.title);
     const bb = extractBrand(b.offer.title);
     if (ba && bb && ba !== bb) return false;
+    // The guards apply here too: a shared catalog id anchors the
+    // match, but it is not proof of identity when the titles name a
+    // bundle vs a single, or two different product lines (live
+    // Nov 2026: a Glycolic + Niacinamide bundle shared the serum's
+    // catalog id and merged into its group).
+    if (hasBundleMismatch(a.offer.title, b.offer.title)) return false;
+    if (hasDistinctiveTokens(a.offer.title, b.offer.title)) return false;
     return !statedVariantConflict(a.variant, b.variant);
   }
   // No shared catalog id: strict path — same variant signature, same
@@ -699,18 +718,38 @@ export function buildGroups(
 
   const clusters: PreparedOffer[][] = [];
   for (const candidate of priced) {
-    let placed = false;
+    // A candidate joins a cluster only when it matches some member
+    // AND conflicts with no member (a stated size/SPF/multipack
+    // conflict, or bundle-vs-single). Matching any member keeps one
+    // quirky title from fragmenting a group, but the no-conflict rule
+    // stops a size-less listing from bridging two stated variants
+    // (live Nov 2026: a size-less title bridged the 30 ml and 60 ml
+    // Ordinary serums), and stops a bundle sharing a catalog id from
+    // joining a cluster of singles. (The distinctive-token guard is
+    // deliberately NOT in this check: two noisy titles for the same
+    // product can each keep a token the other lacks, and they still
+    // belong together — the guard already runs on the admitting pair
+    // in offersMatch.)
+    // When several clusters qualify, the candidate joins the LARGEST
+    // one: an underspecified listing most likely is the majority
+    // variant it matches, not whichever cluster happened to form
+    // first. Ties keep the earliest cluster, so grouping stays
+    // deterministic.
+    let best: PreparedOffer[] | null = null;
     for (const cluster of clusters) {
-      // Match against ANY member, not just the first: one quirky first
-      // title must not fragment the group. First matching cluster wins,
-      // and candidate order is deterministic, so grouping stays stable.
-      if (cluster.some((member) => offersMatch(candidate, member, queryBrand))) {
-        cluster.push(candidate);
-        placed = true;
-        break;
+      if (
+        cluster.some((member) => offersMatch(candidate, member, queryBrand)) &&
+        cluster.every(
+          (member) =>
+            !statedVariantConflict(candidate.variant, member.variant) &&
+            !hasBundleMismatch(candidate.offer.title, member.offer.title),
+        )
+      ) {
+        if (best === null || cluster.length > best.length) best = cluster;
       }
     }
-    if (!placed) clusters.push([candidate]);
+    if (best !== null) best.push(candidate);
+    else clusters.push([candidate]);
   }
 
   const groups: ProductGroup[] = clusters.map((cluster, idx) => {

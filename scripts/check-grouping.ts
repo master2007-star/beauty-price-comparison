@@ -214,7 +214,9 @@ check("both brand-less, no query-brand token → no merge", bothBrandless.length
  * merged five product lines + combos via title overlap, because shared
  * generic tokens (brand + "sunscreen" + "SPF 50") passed the overlap
  * bar while the line names were ignored. The guards below keep those
- * lines apart. Catalog-id matching is untouched by the guards. */
+ * lines apart. They also apply to catalog-id matching: a shared id is
+ * not proof of identity when the titles disagree on the product
+ * itself (see catalogBundleGuard below). */
 
 check("guard fires: Strawberry vs Vitamin C + E", hasDistinctiveTokens(
   "Dot & Key Strawberry Dew Tinted Sunscreen SPF 50+ PA++++",
@@ -302,12 +304,16 @@ const duoVsSingle = buildGroups(dedupeOffers([
 ]), "INR");
 check("duo vs single splits", duoVsSingle.length === 2, `got ${duoVsSingle.length} groups`);
 
-/* Guards never apply to catalog-id matching: the catalog rule is unchanged. */
-const catalogIgnoresGuards = buildGroups(dedupeOffers([
+/* Guards DO apply to catalog-id matching now: a shared catalog id is
+ * not proof of identity when the titles name a bundle vs a single
+ * (live Nov 2026: a Glycolic + Niacinamide bundle shared the serum's
+ * catalog id and merged into its group). Claim noise still merges —
+ * see catalogClaimNoise below. */
+const catalogBundleGuard = buildGroups(dedupeOffers([
   offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50", store: "Nykaa", price: 400, catalogId: "CATG" }),
   offer({ title: "Dot & Key Vitamin C + E Super Bright Sunscreen SPF 50 Combo", store: "Amazon.in", price: 700, catalogId: "CATG" }),
 ]), "INR");
-check("catalogId match still merges even with a bundle word", catalogIgnoresGuards.length === 1, `got ${catalogIgnoresGuards.length} groups`);
+check("catalogId + bundle word splits (guards apply to catalog matches)", catalogBundleGuard.length === 2, `got ${catalogBundleGuard.length} groups`);
 
 const catalogClaimNoise = buildGroups(dedupeOffers([
   offer({ title: "CeraVe Moisturising Cream 50 ml", store: "Nykaa", price: 550, catalogId: "CATD" }),
@@ -518,6 +524,99 @@ check(
   "live: 30ml 2-pack Syga stays separate from the 60ml singles (size + pack differ)",
   groupOf("Syga India", 1080)?.offers.length === 1,
 );
+
+/* ------------- live regression: Nov 2026 Cetaphil size/line mixing ------------- */
+/* A phone screenshot (2026-11-22) showed one Cetaphil cleanser group
+ * holding FirstCry ₹161, Amazon ₹179 and Nykaa ₹197 (small-pack
+ * Hydrating Foaming Cream Cleanser) together with Amazon ₹1,789 (the
+ * 1L Gentle Skin Cleanser, ₹1,786 on Amazon itself). Root cause,
+ * found by replaying the real titles through the real code: the
+ * listings share a Google catalog id, and the catalog-id path merged
+ * them — a size stated on one side only never conflicts, and the
+ * distinctive-token / bundle guards never touched catalog-id
+ * matching. Worse, "Gentle Skin Cleanser" reduced to ZERO significant
+ * tokens ("gentle" and "skin" were claim words, "cleanser" a form),
+ * so the token guard could never fire against "Foaming" even on the
+ * title path. The fixtures below pin the fix: guards apply on the
+ * catalog path too, and "gentle" is a line word. */
+
+check("guard fires: Foaming Cream Cleanser vs Gentle Skin Cleanser", hasDistinctiveTokens(
+  "Cetaphil Hydrating Foaming Cream Cleanser",
+  "Cetaphil Gentle Skin Cleanser 1L",
+) === true);
+check("guard quiet: same line, size differs only", hasDistinctiveTokens(
+  "Cetaphil Hydrating Foaming Cream Cleanser",
+  "Cetaphil Hydrating Foaming Cream Cleanser 125ml",
+) === false);
+
+const cetaphilCatalog = buildGroups(dedupeOffers([
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser", store: "FirstCry India", price: 161, catalogId: "CATCET" }),
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser 125ml", store: "Amazon.in", price: 179, catalogId: "CATCET" }),
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser", store: "Nykaa", price: 197, catalogId: "CATCET" }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 1L", store: "Amazon.in", price: 1789, catalogId: "CATCET" }),
+]), "INR");
+check("Cetaphil: small-pack cleansers merge, 1L stays separate despite shared catalogId", cetaphilCatalog.length === 2, `got ${cetaphilCatalog.length}`);
+const cetaphilSmall = cetaphilCatalog.find((g) => g.lowestPrice === 161);
+check("Cetaphil: small-pack group is 3 stores, ₹161–₹197", cetaphilSmall !== undefined && cetaphilSmall.storeCount === 3 && cetaphilSmall.highestPrice === 197, `stores=${cetaphilSmall?.storeCount} high=${cetaphilSmall?.highestPrice}`);
+check("Cetaphil: 1L is its own group", cetaphilCatalog.some((g) => g.offers.length === 1 && g.lowestPrice === 1789));
+
+const cetaphilLines = buildGroups(dedupeOffers([
+  offer({ title: "Cetaphil Hydrating Foaming Cream Cleanser", store: "FirstCry India", price: 161 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 1L", store: "Amazon.in", price: 1789 }),
+]), "INR");
+check("Foaming Cream Cleanser vs Gentle Skin Cleanser splits (no catalogId)", cetaphilLines.length === 2, `got ${cetaphilLines.length} groups`);
+
+/* ------------- live regression: Nov 2026 Ordinary 60ml bridge + bundle ------------- */
+/* A browser check (2026-11-22) on "The Ordinary Niacinamide 10% +
+ * Zinc 1% Serum" found 60ml listings (₹1,886.29, ₹3,456) and a
+ * Glycolic Acid toner + Niacinamide bundle (₹1,711.15, desertcart)
+ * inside the 30ml serum group. Root cause, found by replaying the
+ * real titles through the real code: a size-less listing bridged the
+ * 30ml and 60ml variants (a candidate only had to match ANY cluster
+ * member, so the 60ml joined through the size-less one), and the
+ * bundle shared the serum's catalog id, where the guards never
+ * applied. The fix: a candidate joins only when it conflicts with NO
+ * member of the cluster; and among qualifying clusters it joins the
+ * largest (the majority variant is the best evidence for an
+ * underspecified listing). */
+
+const ordinarySizeBridge = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Amazon.in", price: 620 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Purplle", price: 640 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum", store: "Amazon.in", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 60ml", store: "Amazon.in", price: 1886 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 60ml", store: "Nykaa", price: 3456 }),
+]), "INR", extractQueryBrand("The Ordinary Niacinamide 10% + Zinc 1% Serum"));
+check("Ordinary: 30ml + no-size + 60ml form exactly 2 groups", ordinarySizeBridge.length === 2, `got ${ordinarySizeBridge.length}`);
+const serum30 = ordinarySizeBridge.find((g) => g.offers.some((o) => o.price === 600 && o.store === "Nykaa"));
+check("Ordinary: 30ml group holds the no-size listing (majority variant)", serum30 !== undefined && serum30.offers.length === 4 && serum30.storeCount === 3, `offers=${serum30?.offers.length} stores=${serum30?.storeCount}`);
+const serum60 = ordinarySizeBridge.find((g) => g.offers.some((o) => o.price === 1886));
+check("Ordinary: 60ml group is its own 2-store group", serum60 !== undefined && serum60.offers.length === 2 && serum60.storeCount === 2, `offers=${serum60?.offers.length} stores=${serum60?.storeCount}`);
+check("Ordinary: no group mixes stated 30ml and 60ml", ordinarySizeBridge.every((g) => {
+  const sizes = new Set(g.offers.map((o) => extractSize(o.title)?.value ?? null));
+  return !(sizes.has(30) && sizes.has(60));
+}));
+
+const ordinaryCatalogBundle = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 600, catalogId: "CATOB" }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml + Glycolic Acid 7% Toning Solution 240ml Combo", store: "desertcart.com.sa", price: 1711, catalogId: "CATOB" }),
+]), "INR");
+check("catalogId + bundle word splits (was the live desertcart merge)", ordinaryCatalogBundle.length === 2, `got ${ordinaryCatalogBundle.length} groups`);
+
+/* ------------- live regression: Nov 2026 "22 stores, 34 prices" count ------------- */
+/* The Ordinary group card said "22 stores compared" / "View all 22
+ * prices" while the expanded group listed 34 offers. storeCount
+ * counts distinct stores; the expanded list counts offers (StoreRows
+ * maps group.offers). The card's "View all N prices" must use
+ * offers.length — this pins the group shape that distinction relies
+ * on (the label fix itself is in Results.tsx). */
+const countShape = buildGroups(dedupeOffers([
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Amazon.in", price: 600 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Amazon.in", price: 650 }),
+  offer({ title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml", store: "Nykaa", price: 620 }),
+]), "INR");
+check("one store can hold two prices: storeCount 2, offers 3", countShape.length === 1 && countShape[0].storeCount === 2 && countShape[0].offers.length === 3, `stores=${countShape[0]?.storeCount} offers=${countShape[0]?.offers.length}`);
 
 console.log(failures === 0 ? "\nAll grouping checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

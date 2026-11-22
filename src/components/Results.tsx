@@ -304,7 +304,7 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
       transition={{ type: "spring", stiffness: 120, damping: 20 }}
       role="button"
       tabIndex={0}
-      aria-label={`View all ${group.storeCount} ${group.storeCount === 1 ? "price" : "prices"} for ${group.title}`}
+      aria-label={`View all ${group.offers.length} ${group.offers.length === 1 ? "price" : "prices"} for ${group.title}`}
       onClick={() => onOpen(group)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -344,7 +344,7 @@ function GroupCard({ group, onOpen }: { group: ProductGroup; onOpen: (g: Product
         ))}
       </div>
       <div className="group-cta" aria-hidden="true">
-        <span>View all {group.storeCount} {group.storeCount === 1 ? "price" : "prices"}</span>
+        <span>View all {group.offers.length} {group.offers.length === 1 ? "price" : "prices"}</span>
         <span className="group-cta-arrow">→</span>
       </div>
     </motion.article>
