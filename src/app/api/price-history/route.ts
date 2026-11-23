@@ -17,28 +17,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Missing key parameter." }, { status: 400 });
   }
 
-  if (key.trim() === "debug") {
-    try {
-      const { ensureSchema, withClient } = await import("@/lib/db");
-      await ensureSchema();
-      const info = await withClient(async (client) => {
-        const countRes = await client.sql`SELECT COUNT(*) FROM price_snapshots`;
-        const sample = await client.sql`SELECT * FROM price_snapshots ORDER BY id DESC LIMIT 5`;
-        return { count: countRes.rows[0]?.count, sample: sample.rows };
-      });
-      return NextResponse.json({
-        configured: isDatabaseConfigured(),
-        ...info,
-      });
-    } catch (err: unknown) {
-      const e = err as { message?: string; stack?: string };
-      return NextResponse.json({
-        configured: isDatabaseConfigured(),
-        error: e?.message,
-      });
-    }
-  }
-
   const daysParam = url.searchParams.get("days");
   const days = daysParam ? parseInt(daysParam, 10) : 30;
   const safeDays = Number.isFinite(days) && days > 0 ? days : 30;
