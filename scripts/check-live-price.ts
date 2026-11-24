@@ -4,7 +4,7 @@
  * unit-level checks over HTML strings.
  * Run: npm run check:live-price
  */
-import { extractAmazonPrice, extractJsonLdPrice } from "../src/lib/live-price";
+import { extractAmazonPrice, extractDigihaatPrice, extractJsonLdPrice } from "../src/lib/live-price";
 import { isDirectProductUrl, sanitizeProductUrl } from "../src/lib/url";
 
 let failures = 0;
@@ -327,6 +327,41 @@ check(
   sanitizeProductUrl(
     "https://store.com/products/serum?variant=123&utm_source=google&utm_medium=cpc&gclid=xyz&skuId=999"
   ) === "https://store.com/products/serum?variant=123&skuId=999",
+);
+
+/* ------------------- F5: Digihaat / ONDC price extraction ------------------- */
+const digihaatHtmlMeta = `
+  <html>
+    <head>
+      <meta property="og:title" content="Maybelline New York Fit Me Matte & Poreless Foundation Shade 339" />
+      <meta property="product:price:amount" content="742.00" />
+      <meta property="product:price:currency" content="INR" />
+    </head>
+    <body>
+      <div class="product-details">
+        <h1 class="title">Maybelline New York Fit Me Matte & Poreless Foundation Shade 339</h1>
+        <div class="price">₹742.00</div>
+      </div>
+    </body>
+  </html>
+`;
+const digihaatPrice = extractDigihaatPrice(digihaatHtmlMeta);
+check(
+  "F5: extractDigihaatPrice extracts price from Digihaat / ONDC page markup",
+  digihaatPrice !== null && digihaatPrice.price === 742 && digihaatPrice.currency === "INR",
+);
+
+const digihaatHtmlClass = `
+  <html>
+    <body>
+      <span class="selling-price">₹ 742</span>
+    </body>
+  </html>
+`;
+const digihaatClassPrice = extractDigihaatPrice(digihaatHtmlClass);
+check(
+  "F5: extractDigihaatPrice extracts selling-price class markup",
+  digihaatClassPrice !== null && digihaatClassPrice.price === 742,
 );
 
 console.log(failures === 0 ? "\nAll live-price checks passed." : `\n${failures} check(s) failed.`);

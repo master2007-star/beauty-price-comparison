@@ -155,6 +155,87 @@ export interface VariantSignature {
   multipack: number;
   spf: number | null;
   forms: Set<string>;
+  shade: string | null;
+}
+
+const SHADE_NAMES = [
+  "fair porcelain",
+  "warm nude",
+  "classic ivory",
+  "natural ivory",
+  "fair ivory",
+  "natural beige",
+  "pure beige",
+  "sun beige",
+  "warm sun",
+  "golden caramel",
+  "classic tan",
+  "soft tan",
+  "rich tan",
+  "deep bronze",
+  "warm honey",
+  "spiced sand",
+  "porcelain",
+  "warm beige",
+  "ivory",
+  "beige",
+  "toffee",
+  "mocha",
+  "espresso",
+  "caramel",
+  "sand",
+  "honey",
+  "buff",
+  "almond",
+  "hazelnut",
+  "chestnut",
+  "vanilla",
+  "cashew",
+  "tawny",
+];
+
+export function extractShade(title: string): string | null {
+  if (!title) return null;
+  const lower = title.toLowerCase();
+
+  // Pattern: "Shade 339" or "Shade - 128" or "Shade No. 128"
+  const shadeNumMatch = /\bshade\s*(?:no\.?|-|:)?\s*(\d{2,4}[a-z]?)\b/i.exec(lower);
+  if (shadeNumMatch) {
+    return shadeNumMatch[1].trim();
+  }
+
+  // Pattern: "128 Warm Nude" or "115 Ivory" or "310 Sun Beige"
+  const numNameMatch = /\b(\d{2,3})\s+(warm|fair|cool|light|deep|natural|classic)?\s*(nude|porcelain|ivory|beige|caramel|toffee|honey|sand|tan|mocha|espresso|buff|almond)\b/i.exec(lower);
+  if (numNameMatch) {
+    return numNameMatch[0].trim();
+  }
+
+  // Multi-word shade names first, then single-word
+  for (const name of SHADE_NAMES) {
+    const re = new RegExp(`\\b${name.replace(/\s+/g, "\\s+")}\\b`, "i");
+    if (re.test(lower)) {
+      return name;
+    }
+  }
+
+  // Standalone shade code pattern: "Shade: Fair Porcelain"
+  const genericShadeMatch = /\bshade\s*(?:no\.?|-|:)?\s*([a-z0-9\s-]+?)(?:\s*,\s*|\s*-\s*|\s*\d+\s*(?:ml|g|gm|oz)|\s*\(|\s*\)|$)/i.exec(lower);
+  if (genericShadeMatch && genericShadeMatch[1].trim().length > 1) {
+    const val = genericShadeMatch[1].trim();
+    if (!/^(of|for|with|and)$/.test(val)) return val;
+  }
+
+  return null;
+}
+
+export function shadesMatch(a: string | null, b: string | null): boolean {
+  if (!a || !b) return true; // unstated side does not conflict
+  const normA = a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const normB = b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (normA === normB) return true;
+  const wordsA = normA.split(/\s+/).filter((w) => w.length > 1);
+  const wordsB = normB.split(/\s+/).filter((w) => w.length > 1);
+  return wordsA.some((w) => wordsB.includes(w));
 }
 
 export function variantSignature(title: string, productUrl?: string | null): VariantSignature {
@@ -167,6 +248,7 @@ export function variantSignature(title: string, productUrl?: string | null): Var
     multipack: extractMultipack(title),
     spf: extractSpf(title),
     forms: extractForms(title),
+    shade: extractShade(title),
   };
 }
 
@@ -188,6 +270,7 @@ export function sameVariant(a: VariantSignature, b: VariantSignature): boolean {
   if (a.size && b.size && !sizesMatch(a.size, b.size)) return false;
   if (a.multipack !== b.multipack) return false;
   if (a.spf !== b.spf) return false;
+  if (a.shade && b.shade && !shadesMatch(a.shade, b.shade)) return false;
   // Form: identical sets, or one side empty (unstated). Disjoint stated
   // forms (serum vs cream) split.
   if (a.forms.size > 0 && b.forms.size > 0) {
@@ -981,6 +1064,13 @@ function variantPriceCompatible(candidate: PreparedOffer, cluster: PreparedOffer
   // If both have stated sizes, ensure candidate matches all stated sizes in cluster
   if (cSize && clusterSizes.length > 0) {
     if (!clusterSizes.every((s) => sizesMatch(cSize, s))) return false;
+  }
+
+  // If candidate and cluster members state shades, ensure shades match
+  const cShade = candidate.variant.shade;
+  const clusterShades = cluster.map((m) => m.variant.shade).filter((s): s is string => s !== null);
+  if (cShade && clusterShades.length > 0) {
+    if (!clusterShades.every((s) => shadesMatch(cShade, s))) return false;
   }
 
   // When there is an asymmetry (one side has stated size and the other does not):

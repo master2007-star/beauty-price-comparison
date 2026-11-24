@@ -206,6 +206,53 @@ export function extractAmazonPrice(html: string): AmazonPrice | null {
   }
 }
 
+/**
+ * Digihaat / ONDC product page price extractor:
+ * Digihaat PDPs render product prices via meta property tags,
+ * itemprop="price", or class-based price blocks.
+ */
+export function extractDigihaatPrice(html: string): JsonLdPrice | null {
+  try {
+    // 1. Meta tags (standard e-commerce og:price:amount or product:price:amount)
+    const metaAmount =
+      /<meta\s+(?:property|name)=["'](?:product:price:amount|og:price:amount|twitter:data1)["']\s+content=["']([\d.,]+)["']/i.exec(html) ??
+      /<meta\s+content=["']([\d.,]+)["']\s+(?:property|name)=["'](?:product:price:amount|og:price:amount|twitter:data1)["']/i.exec(html);
+    if (metaAmount) {
+      const p = parseFloat(metaAmount[1].replace(/,/g, ""));
+      if (Number.isFinite(p) && p > 0) return { price: Math.round(p * 100) / 100, currency: "INR" };
+    }
+
+    // 2. itemprop="price" content
+    const itemProp =
+      /itemprop=["']price["']\s+content=["']([\d.,]+)["']/i.exec(html) ??
+      /<[^>]+itemprop=["']price["'][^>]*>[\s₹Rs.]*([\d.,]+)/i.exec(html);
+    if (itemProp) {
+      const p = parseFloat(itemProp[1].replace(/,/g, ""));
+      if (Number.isFinite(p) && p > 0) return { price: Math.round(p * 100) / 100, currency: "INR" };
+    }
+
+    // 3. Embedded JSON (__NEXT_DATA__ or product state)
+    const jsonMatch =
+      /"(?:selling_price|final_price|special_price|price)"\s*:\s*([\d.]+)/i.exec(html);
+    if (jsonMatch) {
+      const p = parseFloat(jsonMatch[1]);
+      if (Number.isFinite(p) && p > 0) return { price: Math.round(p * 100) / 100, currency: "INR" };
+    }
+
+    // 4. HTML class based price elements
+    const classPrice =
+      /<(?:span|div|p)\s+class=["'][^"']*(?:product-price|selling-price|special-price|current-price|price-tag)[^"']*["'][^>]*>[\s₹Rs.]*([\d.,]+)/i.exec(html);
+    if (classPrice) {
+      const p = parseFloat(classPrice[1].replace(/,/g, ""));
+      if (Number.isFinite(p) && p > 0) return { price: Math.round(p * 100) / 100, currency: "INR" };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /* --------------------------- fetch guards --------------------------- */
 
 function isPrivateIp(host: string): boolean {
@@ -439,6 +486,10 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
         const viaApi = await fetchAmazonProductPrice(url, page.finalUrl, cfg);
         if (viaApi) found = viaApi;
       }
+    }
+    if (!found && (finalHost === "digihaat.in" || finalHost.endsWith(".digihaat.in") || finalHost.includes("digihaat"))) {
+      const digihaat = extractDigihaatPrice(page.html);
+      if (digihaat) found = digihaat;
     }
 
     if (found && found.price > 0) {

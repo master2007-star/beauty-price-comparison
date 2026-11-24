@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { refreshPrices, resolveLinks } from "@/lib/client-api";
-import { applyLivePrices, detailRowKey, filterVisibleDetailRows } from "@/lib/detail-pricing";
+import { applyLivePrices, computeEffectiveStats, detailRowKey, filterVisibleDetailRows } from "@/lib/detail-pricing";
 import { formatPrice } from "@/lib/format";
-import { computeGroupSavings, extractSize, sizesMatch } from "@/lib/grouping";
+import { computeGroupSavings, extractShade, extractSize, normalizeTitleKey, shadesMatch, sizesMatch } from "@/lib/grouping";
 import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 import { isDirectProductUrl, sanitizeProductUrl } from "@/lib/url";
@@ -110,13 +110,16 @@ export function ProductThumb({
  *  gate still uses the clicked offer only — never a sibling's. */
 function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
   const offerSize = extractSize(offer.title);
-  // Only pool sibling tokens that match the exact variant size and price band
+  const offerShade = extractShade(offer.title);
+  // Only pool sibling tokens that match the exact variant size, shade, and price band
   const compatible = groupOffers
     ? groupOffers.filter((o) => {
         const oSize = extractSize(o.title);
         if (offerSize && oSize && !sizesMatch(offerSize, oSize)) return false;
+        const oShade = extractShade(o.title);
+        if (offerShade && oShade && !shadesMatch(offerShade, oShade)) return false;
         if (offer.price > 0 && o.price > 0) {
-          if (o.price > offer.price * 1.5 || o.price < offer.price / 1.5) return false;
+          if (o.price > offer.price * 2.0 || o.price < offer.price / 2.0) return false;
         }
         return true;
       })
@@ -751,6 +754,16 @@ function TrackPriceSection({ group }: { group: ProductGroup }) {
 function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => void }) {
   const [livePrices, setLivePrices] = useState<Record<string, RefreshPricesResult>>({});
 
+  const rows = useMemo(
+    () => applyLivePrices(group.offers, livePrices, group.currency),
+    [group, livePrices],
+  );
+
+  const effectiveStats = useMemo(
+    () => computeEffectiveStats(rows, group.currency, group),
+    [rows, group],
+  );
+
   useEffect(() => {
     const controller = new AbortController();
     const items = group.offers.map((offer, i) => {
@@ -812,11 +825,11 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
             <div className="detail-summary">
               <div className="detail-stat">
                 <span className="detail-stat-label">Lowest</span>
-                <span className="detail-stat-value">{group.lowestLabel}</span>
+                <span className="detail-stat-value">{effectiveStats.lowestLabel}</span>
               </div>
               <div className="detail-stat">
                 <span className="detail-stat-label">Highest</span>
-                <span className="detail-stat-value">{group.highestLabel}</span>
+                <span className="detail-stat-value">{effectiveStats.highestLabel}</span>
               </div>
               {group.savingsPercent > 0 ? (
                 <div className="detail-stat detail-stat-save">

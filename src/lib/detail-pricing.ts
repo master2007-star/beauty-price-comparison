@@ -13,7 +13,7 @@
  * so the original index travels with each row and the live result (the
  * Live badge + the warmed direct URL) stays attached after re-sorting.
  */
-import { deltaLabel } from "./format";
+import { deltaLabel, formatPrice } from "./format";
 import type { Offer, RefreshPricesResult } from "./types";
 
 /** One offer row in the detail view, with its live price applied. */
@@ -95,6 +95,29 @@ export function applyLivePrices(
 }
 
 /**
+ * Derives header stats from the effective prices used in the detail rows.
+ * When live prices resolve, header LOWEST/HIGHEST track the list's effective
+ * prices so the header never shows a stale search-time figure.
+ */
+export function computeEffectiveStats(
+  rows: DetailRow[],
+  currency: string,
+  fallback: { lowestPrice: number; highestPrice: number; lowestLabel: string; highestLabel: string },
+): { lowestPrice: number; highestPrice: number; lowestLabel: string; highestLabel: string } {
+  if (!rows || rows.length === 0) return fallback;
+  const prices = rows.map((r) => r.effectivePrice).filter((p) => p > 0);
+  if (prices.length === 0) return fallback;
+  const lowest = Math.min(...prices);
+  const highest = Math.max(...prices);
+  return {
+    lowestPrice: lowest,
+    highestPrice: highest,
+    lowestLabel: formatPrice(lowest, currency),
+    highestLabel: formatPrice(highest, currency),
+  };
+}
+
+/**
  * A store row is hidden ONLY once its link resolution has been attempted
  * and has definitively failed — i.e. the detail refresh already ran for
  * this row and returned no direct URL, or the user clicked "Go to Store"
@@ -112,7 +135,7 @@ export function isDetailRowHidden(
   if (row.offer.directUrl) return false;
   // Warmed direct URL from refresh is kept
   if (row.live?.directUrl) return false;
-  // If resolution was never attempted for this row, it stays visible
+  // If resolution was never attempted or is still in-flight (pending), it stays visible
   if (!row.live) return false;
   // Resolution was attempted and produced no direct URL
   return true;
@@ -121,11 +144,17 @@ export function isDetailRowHidden(
 /**
  * Filters rows for display in the detail view while keeping deltas and
  * statistics calculated across all offers.
+ *
+ * Never-empty guardrail: if all rows would be hidden, keep ALL rows visible.
+ * Detail view must never show zero rows with an empty card.
  */
 export function filterVisibleDetailRows(
   rows: DetailRow[],
   clickedFailedKeys?: Set<string>,
 ): { visibleRows: DetailRow[]; hiddenCount: number } {
-  const visibleRows = rows.filter((r) => !isDetailRowHidden(r, clickedFailedKeys));
-  return { visibleRows, hiddenCount: rows.length - visibleRows.length };
+  const visible = rows.filter((r) => !isDetailRowHidden(r, clickedFailedKeys));
+  if (visible.length === 0 && rows.length > 0) {
+    return { visibleRows: rows, hiddenCount: 0 };
+  }
+  return { visibleRows: visible, hiddenCount: rows.length - visible.length };
 }

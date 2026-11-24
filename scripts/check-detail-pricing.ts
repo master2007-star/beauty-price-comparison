@@ -5,6 +5,7 @@
  */
 import {
   applyLivePrices,
+  computeEffectiveStats,
   detailRowKey,
   filterVisibleDetailRows,
   isDetailRowHidden,
@@ -235,6 +236,35 @@ check(
   r2Visible.find((r) => r.offer.store === "Nykaa")?.deltaLabel === "+₹405 vs lowest",
 );
 
+/* ------------------- Addendum 2: never-empty guardrail & pending rows ------------------- */
+const allFailingOffers = [
+  offer({ store: "Store A", price: 300 }),
+  offer({ store: "Store B", price: 350 }),
+  offer({ store: "Store C", price: 400 }),
+];
+const allFailingLive: Record<string, RefreshPricesResult> = {
+  [detailRowKey(allFailingOffers[0], 0)]: { key: detailRowKey(allFailingOffers[0], 0), status: "unavailable", livePrice: null, currency: null, directUrl: undefined },
+  [detailRowKey(allFailingOffers[1], 1)]: { key: detailRowKey(allFailingOffers[1], 1), status: "unavailable", livePrice: null, currency: null, directUrl: undefined },
+  [detailRowKey(allFailingOffers[2], 2)]: { key: detailRowKey(allFailingOffers[2], 2), status: "unavailable", livePrice: null, currency: null, directUrl: undefined },
+};
+const allFailingRows = applyLivePrices(allFailingOffers, allFailingLive, "INR");
+const { visibleRows: guardedRows, hiddenCount: guardedHidden } = filterVisibleDetailRows(allFailingRows);
+check(
+  "Addendum 2 (a): never-empty guardrail keeps all rows visible when every row would be hidden",
+  guardedRows.length === 3 && guardedHidden === 0,
+);
+
+const pendingOffers = [
+  offer({ store: "Store P", price: 500 }),
+];
+const pendingLive: Record<string, RefreshPricesResult> = {}; // in flight, no result received yet
+const pendingRows = applyLivePrices(pendingOffers, pendingLive, "INR");
+const { visibleRows: pVisible } = filterVisibleDetailRows(pendingRows);
+check(
+  "Addendum 2 (b): pending rows whose refresh is in flight stay visible",
+  pVisible.length === 1 && pVisible[0].offer.store === "Store P",
+);
+
 /* ------------------- R3: product thumbnail & placeholder checks ------------------- */
 const noThumb = getProductThumbSource(null, false);
 const emptyThumb = getProductThumbSource("", false);
@@ -268,6 +298,43 @@ const groupImage = pickGroupImage([
 check(
   "R3 (e): pickGroupImage prioritizes clean https CDN URL over data URI",
   groupImage === "https://encrypted-tbn0.gstatic.com/images?q=tbn:abc",
+);
+
+/* ------------------- F4: applyLivePrices preserves row count and effective stats ------------------- */
+const f4Offers = [
+  offer({ store: "Purplle.com - Purplle- MP", price: 204 }),
+  offer({ store: "Slikk Club", price: 213 }),
+  offer({ store: "Purplle.com", price: 441 }),
+];
+const f4Live: Record<string, RefreshPricesResult> = {
+  [detailRowKey(f4Offers[0], 0)]: {
+    key: detailRowKey(f4Offers[0], 0),
+    status: "unverified",
+    livePrice: null,
+    currency: null,
+  },
+  [detailRowKey(f4Offers[2], 2)]: {
+    key: detailRowKey(f4Offers[2], 2),
+    status: "live",
+    livePrice: 422,
+    currency: "INR",
+  },
+};
+const f4Rows = applyLivePrices(f4Offers, f4Live, "INR");
+check(
+  "F4 (a): applyLivePrices never drops a row (count before and after identical)",
+  f4Rows.length === f4Offers.length,
+);
+
+const f4Stats = computeEffectiveStats(f4Rows, "INR", {
+  lowestPrice: 204,
+  highestPrice: 441,
+  lowestLabel: "₹204",
+  highestLabel: "₹441",
+});
+check(
+  "F4 (b): header lowest/highest derive from same effective prices as list (lowest: 204, highest: 422)",
+  f4Stats.lowestPrice === 204 && f4Stats.highestPrice === 422 && f4Stats.highestLabel === "₹422",
 );
 
 console.log(failures === 0 ? "\nAll detail-pricing checks passed." : `\n${failures} check(s) failed.`);

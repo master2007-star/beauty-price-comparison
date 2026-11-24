@@ -6,7 +6,7 @@
  * global fetch is stubbed with canned SerpApi payloads.
  * Run: npm run check:resolve-links
  */
-import { resolveDirectLink } from "../src/lib/resolve";
+import { resolveDirectLink, titleMatches } from "../src/lib/resolve";
 import type { AppConfig } from "../src/lib/env";
 
 let failures = 0;
@@ -268,6 +268,20 @@ async function main() {
     "R1 regression: zero network fetch calls made for google search URL",
     !fetchedSearchUrl,
     `fetched: ${redirectFetches.join(", ")}`
+  );
+
+  /* Case 12 (F3 regression): shade & size variant matching */
+  const wantedMaybelline = "Maybelline Fit Me Matte Poreless Foundation 30ml Fair Porcelain";
+  const wrongCandidate = "Maybelline New York Fit Me Matte+Poreless Liquid Foundation Tube, 128 Warm Nude, 18 ml";
+  const rightCandidate = "Maybelline New York Fit Me Matte+Poreless Liquid Foundation Fair Porcelain 30 ml";
+
+  check(
+    "F3 regression: 18 ml Warm Nude candidate rejected for 30 ml Fair Porcelain",
+    titleMatches(wantedMaybelline, wrongCandidate) === false,
+  );
+  check(
+    "F3 regression: matching 30 ml Fair Porcelain candidate accepted",
+    titleMatches(wantedMaybelline, rightCandidate) === true,
   );
 
   console.log(failures === 0 ? "\nAll resolve-links checks passed." : `\n${failures} check(s) failed.`);

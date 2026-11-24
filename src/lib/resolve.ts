@@ -44,7 +44,7 @@
  */
 import type { AppConfig } from "./env";
 import { pricesEqual, storesMatch } from "./format";
-import { extractSize, sizesMatch } from "./grouping";
+import { extractShade, extractSize, shadesMatch, sizesMatch } from "./grouping";
 import type { ProviderId, ResolveLinksRequest, ResolveLinksResponse } from "./types";
 import { isDirectProductUrl, sanitizeProductUrl } from "./url";
 
@@ -194,7 +194,7 @@ function evaluateSeller(
       attempt.nameMatchedNoPrice ??= name;
       return null;
     }
-    if (price > wantedPrice * 1.5 || price < wantedPrice / 1.5) {
+    if (price > wantedPrice * 2.0 || price < wantedPrice / 2.0) {
       attempt.priceMismatch ??= { name, sellerPrice: price };
       return null;
     }
@@ -577,12 +577,16 @@ function noMatchReason(
  * Requires substantial overlap and at least two meaningful terms so a
  * broad category result cannot be mistaken for the clicked product.
  */
-function titleMatches(wanted: string, candidate: string): boolean {
-  // Strict size validation: never treat 118ml and 1L as matching
+export function titleMatches(wanted: string, candidate: string): boolean {
+  // Strict size validation: conflicting stated sizes never match (e.g. 118ml vs 1L, or 30ml vs 18ml)
   const wSize = extractSize(wanted);
   const cSize = extractSize(candidate);
   if (wSize && cSize && !sizesMatch(wSize, cSize)) return false;
-  if (wSize && !cSize) return false;
+
+  // Strict shade validation: conflicting stated shades never match (e.g. Fair Porcelain vs 128 Warm Nude)
+  const wShade = extractShade(wanted);
+  const cShade = extractShade(candidate);
+  if (wShade && cShade && !shadesMatch(wShade, cShade)) return false;
 
   const ignored = new Set([
     "the", "and", "for", "with", "from", "new", "best", "buy", "online",
@@ -610,6 +614,17 @@ function titleMatches(wanted: string, candidate: string): boolean {
 function cleanStoreForQuery(store: string): string {
   const cleaned = store.replace(/\s+by\s+.*$/i, "").trim();
   return cleaned || store;
+}
+
+/** Drop descriptor fluff from the query string so shopping engines find the listing. */
+function cleanTitleForQuery(title: string): string {
+  const ignored = new Set([
+    "skin", "blemish", "formula", "irritation", "helps", "reduces", "educes",
+    "minimize", "minimizes", "pore", "appearance", "care", "daily", "pure",
+    "solution", "treatment"
+  ]);
+  const tokens = title.split(/\s+/).filter((t) => !ignored.has(t.toLowerCase().replace(/[^a-z0-9]/g, "")));
+  return tokens.length >= 2 ? tokens.slice(0, 7).join(" ") : title;
 }
 
 const MAX_REDIRECT_RESOLUTIONS = 3;
@@ -682,7 +697,7 @@ async function matchExactOffer(
     const candPrice =
       asNumber(result.extracted_price) ?? asNumber(result.priceValue) ?? asNumber(result.price);
     if (wantedPrice && candPrice && wantedPrice > 0) {
-      if (candPrice > wantedPrice * 1.5 || candPrice < wantedPrice / 1.5) continue;
+      if (candPrice > wantedPrice * 2.0 || candPrice < wantedPrice / 2.0) continue;
     }
     return { name, link: dest, price: candPrice };
   }
@@ -714,7 +729,7 @@ async function viaSerpApiExactOfferSearch(
   if (!key || !title.trim() || !store.trim()) return null;
   const params = new URLSearchParams({
     engine: "google_shopping",
-    q: `${title} ${cleanStoreForQuery(store)}`,
+    q: `${cleanTitleForQuery(title)} ${cleanStoreForQuery(store)}`,
     google_domain: "google.co.in",
     gl: cfg.region,
     hl: cfg.language,
@@ -744,7 +759,7 @@ async function viaSearloExactOfferSearch(
   const key = cfg.keys.searlo;
   if (!key || !title.trim() || !store.trim()) return null;
   const params = new URLSearchParams({
-    q: `${title} ${cleanStoreForQuery(store)}`,
+    q: `${cleanTitleForQuery(title)} ${cleanStoreForQuery(store)}`,
     gl: cfg.region,
     hl: cfg.language,
     limit: "20",
