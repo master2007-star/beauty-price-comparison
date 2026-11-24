@@ -36,9 +36,12 @@ assert.equal(groups.length, 2);
 async function main() {
   const savedFetch = globalThis.fetch;
   let blocked = false;
+  let loseVariantEvidence = false;
+  let fetchCount = 0;
   globalThis.fetch = async (input) => {
     assert.equal(String(input), provenance.url, "Only replay the captured merchant PDP");
-    const response = new Response(blocked ? "" : html, { status: blocked ? 503 : 200 });
+    fetchCount++;
+    const response = new Response(blocked || (loseVariantEvidence && fetchCount > 1) ? "" : html, { status: blocked ? 503 : 200 });
     Object.defineProperty(response, "url", { value: provenance.url });
     return response;
   };
@@ -49,6 +52,13 @@ async function main() {
     assert.equal(live.status, "live");
     assert.equal(live.livePrice, 69);
     assert.ok(live.verifiedAt && Number.isFinite(Date.parse(live.verifiedAt)));
+    loseVariantEvidence = true;
+    fetchCount = 0;
+    const [ambiguous] = await refreshLivePrices([item], cfg);
+    assert.equal(ambiguous.status, "unverified");
+    assert.equal(ambiguous.livePrice, null);
+    assert.equal(ambiguous.directUrl, undefined);
+    loseVariantEvidence = false;
     blocked = true;
     const [unavailable] = await refreshLivePrices([item], cfg);
     assert.equal(unavailable.livePrice, null);

@@ -27,9 +27,10 @@
  */
 import type { AppConfig } from "./env";
 import { parsePriceLabel } from "./format";
-import { resolveDirectLink } from "./resolve";
+import { resolveDirectLink, titleMatches } from "./resolve";
 import { fetchPageText, isFetchableUrl } from "./merchant-page";
 import { extractOndcProduct } from "./ondc-product";
+import { extractPdpTitle, hasRequiredVariant, requiredVariantTitle } from "./variant-validation";
 import type { RefreshPricesItem, RefreshPricesResult } from "./types";
 
 const MAX_ITEMS = 40;
@@ -369,6 +370,16 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
     const page = await fetchPageText(url);
     if (!page) {
       return { key: item.key, status: "unverified", livePrice: null, currency: null, verifiedAt: null, ...warmed };
+    }
+    const wantedTitle = item.groupTitle || item.title
+      ? requiredVariantTitle(item.groupTitle ?? item.title!, item.title ? [item.title] : []) : undefined;
+    if (hasRequiredVariant(wantedTitle)) {
+      const pageTitle = extractPdpTitle(page.html, new URL(page.finalUrl).searchParams.get("item_id") ?? undefined);
+      if (!pageTitle || !titleMatches(wantedTitle!, pageTitle)) {
+        // The second fetch may select another variant or lose identity
+        // evidence. Keep the snapshot, withhold both Live and the warmed URL.
+        return { ...unavailable, status: "unverified" };
+      }
     }
     let found: JsonLdPrice | null = null;
     // Amazon PDPs carry no JSON-LD price: twister extraction, then the
