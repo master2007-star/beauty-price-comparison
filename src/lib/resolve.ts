@@ -628,6 +628,47 @@ async function resolveCandidateLink(
 }
 
 /**
+ * Shared candidate matcher for the last-resort exact-offer lookups
+ * (SerpApi and Searlo). A hit needs ALL of: a store name matching
+ * the clicked store, a title matching the clicked offer, a link that
+ * resolves to a validated direct product page, and a price within
+ * 1.5x of the clicked offer. Field fallbacks cover both providers'
+ * shapes (source/seller/store/merchant, link/url/product_link,
+ * extracted_price/priceValue/price).
+ */
+async function matchExactOffer(
+  items: unknown[],
+  title: string,
+  store: string,
+  wantedPrice: number | undefined,
+  budget: { remaining: number },
+): Promise<SellerCandidate | null> {
+  for (const item of items.slice(0, 20)) {
+    const result = asRecord(item);
+    if (!result) continue;
+    const name =
+      asString(result.source) ??
+      asString(result.seller) ??
+      asString(result.store) ??
+      asString(result.merchant);
+    const candidateTitle = asString(result.title) ?? asString(result.name);
+    const link = asString(result.link) ?? asString(result.url);
+    const productLink = asString(result.product_link) ?? asString(result.url);
+    if (!name || !candidateTitle || (!link && !productLink)) continue;
+    if (!storesMatch(name, store) || !titleMatches(title, candidateTitle)) continue;
+    const dest = await resolveCandidateLink(link, productLink, budget);
+    if (!dest) continue;
+    const candPrice =
+      asNumber(result.extracted_price) ?? asNumber(result.priceValue) ?? asNumber(result.price);
+    if (wantedPrice && candPrice && wantedPrice > 0) {
+      if (candPrice > wantedPrice * 1.5 || candPrice < wantedPrice / 1.5) continue;
+    }
+    return { name, link: dest, price: candPrice };
+  }
+  return null;
+}
+
+/**
  * Last-resort lookup for offers from providers that supply no usable
  * product token or ID (notably some Serper/Searlo results). The query is
  * constrained to the exact offer title and merchant, and a hit is only
@@ -660,25 +701,49 @@ async function viaSerpApiExactOfferSearch(
   });
   const outcome = await fetchJson(`https://serpapi.com/search.json?${params}`, {});
   if (!outcome.json || outcome.apiError) return null;
-  const budget = { remaining: MAX_REDIRECT_RESOLUTIONS };
-  for (const item of asArray(outcome.json.shopping_results).slice(0, 20)) {
-    const result = asRecord(item);
-    if (!result) continue;
-    const name = asString(result.source) ?? asString(result.seller) ?? asString(result.merchant);
-    const candidateTitle = asString(result.title) ?? asString(result.name);
-    const link = asString(result.link);
-    const productLink = asString(result.product_link);
-    if (!name || !candidateTitle || (!link && !productLink)) continue;
-    if (!storesMatch(name, store) || !titleMatches(title, candidateTitle)) continue;
-    const dest = await resolveCandidateLink(link, productLink, budget);
-    if (!dest) continue;
-    const candPrice = asNumber(result.extracted_price) ?? asNumber(result.price);
-    if (wantedPrice && candPrice && wantedPrice > 0) {
-      if (candPrice > wantedPrice * 1.5 || candPrice < wantedPrice / 1.5) continue;
-    }
-    return { name, link: dest, price: candPrice };
-  }
-  return null;
+  return matchExactOffer(asArray(outcome.json.shopping_results), title, store, wantedPrice, {
+    remaining: MAX_REDIRECT_RESOLUTIONS,
+  });
+}
+
+/**
+ * Searlo fallback for the same last-resort lookup. Searlo's shopping
+ * endpoint is SerpApi-shaped (title/source/link/extracted_price) and
+ * its `link` is often the merchant page directly. Runs only when the
+ * SerpApi attempt returns nothing — notably when SerpApi's monthly
+ * quota is exhausted (HTTP 429), which would otherwise leave every
+ * identity-free row unresolvable. Same gates as the SerpApi path.
+ */
+async function viaSearloExactOfferSearch(
+  title: string,
+  store: string,
+  cfg: AppConfig,
+  wantedPrice?: number,
+): Promise<SellerCandidate | null> {
+  const key = cfg.keys.searlo;
+  if (!key || !title.trim() || !store.trim()) return null;
+  const params = new URLSearchParams({
+    q: `${title} ${cleanStoreForQuery(store)}`,
+    gl: cfg.region,
+    hl: cfg.language,
+    limit: "20",
+  });
+  const outcome = await fetchJson(`https://api.searlo.tech/api/v1/search/shopping?${params}`, {
+    headers: { "x-api-key": key },
+  });
+  if (!outcome.json || outcome.apiError) return null;
+  // Defensive: Searlo's shopping payload shape is not pinned; accept
+  // any of the plausible result-array keys (same order as fetchSearlo).
+  const items = asArray(outcome.json.shopping).length
+    ? asArray(outcome.json.shopping)
+    : asArray(outcome.json.results).length
+      ? asArray(outcome.json.results)
+      : asArray(outcome.json.products).length
+        ? asArray(outcome.json.products)
+        : asArray(outcome.json.organic);
+  return matchExactOffer(items, title, store, wantedPrice, {
+    remaining: MAX_REDIRECT_RESOLUTIONS,
+  });
 }
 
 /**
@@ -757,9 +822,14 @@ export async function resolveDirectLink(
   }
   // Last resort: only identity-free offers with both a title and store
   // can enter this path. A direct merchant PDP must pass both gates.
+  // SerpApi first, Searlo as fallback when SerpApi returns nothing
+  // (e.g. its monthly quota is exhausted) — without the fallback,
+  // every identity-free row stays unresolvable while SerpApi is down.
   if (req.title && req.store) {
-    const hit = await viaSerpApiExactOfferSearch(req.title, req.store, cfg, req.price);
-    if (hit) return { directUrl: hit.link, matchedStore: hit.name, source: "serpapi" satisfies ProviderId };
+    const serpHit = await viaSerpApiExactOfferSearch(req.title, req.store, cfg, req.price);
+    if (serpHit) return { directUrl: serpHit.link, matchedStore: serpHit.name, source: "serpapi" satisfies ProviderId };
+    const searloHit = await viaSearloExactOfferSearch(req.title, req.store, cfg, req.price);
+    if (searloHit) return { directUrl: searloHit.link, matchedStore: searloHit.name, source: "searlo" satisfies ProviderId };
   }
   return { directUrl: null, matchedStore: null, source: null, reason: noMatchReason(req, cfg, serpAttempt, searchAttempt, pageAttempt) };
 }
