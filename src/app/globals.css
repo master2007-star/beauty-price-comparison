@@ -1802,6 +1802,7 @@ img.bento-photo {
   place-items: center;
   font-size: 1.6rem;
   flex: none;
+  color: var(--ink-muted, #7c776e);
 }
 
 .group-title {
@@ -1971,6 +1972,7 @@ img.bento-photo {
   place-items: center;
   font-size: 1.1rem;
   flex: none;
+  color: var(--ink-muted, #7c776e);
 }
 
 /* Clickable group cards: the whole card opens the detail view. The lift
@@ -2087,6 +2089,7 @@ img.bento-photo {
   place-items: center;
   font-size: 2rem;
   flex: none;
+  color: var(--ink-muted, #7c776e);
 }
 
 .detail-title {

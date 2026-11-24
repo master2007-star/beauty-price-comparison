@@ -1002,6 +1002,26 @@ function variantPriceCompatible(candidate: PreparedOffer, cluster: PreparedOffer
   return true;
 }
 
+/**
+ * Pick the best representative thumbnail for a group of offers.
+ * Prioritizes clean HTTP/HTTPS CDN URLs, then valid data:image URIs, then null.
+ */
+export function pickGroupImage(offers: Array<{ imageUrl?: string | null }>): string | null {
+  for (const o of offers) {
+    const url = o.imageUrl?.trim();
+    if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+      return url;
+    }
+  }
+  for (const o of offers) {
+    const url = o.imageUrl?.trim();
+    if (url && url.startsWith("data:image/")) {
+      return url;
+    }
+  }
+  return null;
+}
+
 export function buildGroups(
   rawOffers: RawOffer[],
   fallbackCurrency: string,
@@ -1085,7 +1105,7 @@ export function buildGroups(
     const savingsLabel = savingsInfo ? savingsInfo.savingsLabel : formatPrice(0, currency);
     const savingsPercent = savingsInfo ? savingsInfo.savingsPercent : 0;
     const bestRated = [...offers].sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0))[0];
-    const image = offers.find((o) => o.imageUrl)?.imageUrl ?? null;
+    const image = pickGroupImage(offers);
     const catalogId = cluster.find((c) => c.offer.catalogId)?.offer.catalogId ?? null;
     const productKey = getProductKey({ catalogId, title: cluster[0].offer.title });
     return {

@@ -138,6 +138,24 @@ function immersiveTokenFromApiUrl(url: string | null): string | null {
   }
 }
 
+/** Sanitize and unescape thumbnail URLs returned by shopping providers. */
+export function cleanImageUrl(url: string | null | undefined): string | null {
+  if (!url || typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") return null;
+  if (trimmed.startsWith("data:image/")) {
+    // Unescape Google javascript hex escapes in scraped base64 thumbnails (e.g. \x3d -> =, \x2f -> /, \x2b -> +)
+    return trimmed.replace(/\\+x3d/gi, "=").replace(/\\+x2f/gi, "/").replace(/\\+x2b/gi, "+");
+  }
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
 /**
  * Merchant product URL check: ensures raw links from providers point to
  * an actual merchant product page, rather than Google redirect URLs,
@@ -208,7 +226,7 @@ export async function fetchSerpApi(query: string, cfg: AppConfig): Promise<RawOf
     // when it is a merchant URL; otherwise the resolve/fallback path
     // applies exactly as before.
     offer.directUrl = merchantUrl(rawLink);
-    offer.imageUrl = asString(r.thumbnail);
+    offer.imageUrl = cleanImageUrl(asString(r.thumbnail) ?? asString(r.image));
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews);
     offer.productId = asString(r.product_id);
@@ -267,7 +285,7 @@ export async function fetchSearchApi(query: string, cfg: AppConfig): Promise<Raw
     // SearchApi's raw `link` is the merchant's own page when it is not a
     // Google URL; use it verbatim, exactly like the sponsored ads below.
     offer.directUrl = merchantUrl(asString(r.link));
-    offer.imageUrl = asString(r.thumbnail);
+    offer.imageUrl = cleanImageUrl(asString(r.thumbnail) ?? asString(r.image));
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews);
     offer.productId = asString(r.product_id);
@@ -293,7 +311,7 @@ export async function fetchSearchApi(query: string, cfg: AppConfig): Promise<Raw
     offer.currency = detectCurrency(label, fallback);
     offer.productUrl = link;
     offer.directUrl = merchantUrl(link);
-    offer.imageUrl = asString(r.image);
+    offer.imageUrl = cleanImageUrl(asString(r.image) ?? asString(r.thumbnail));
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews);
     offers.push(offer);
@@ -337,7 +355,7 @@ export async function fetchSerper(query: string, cfg: AppConfig): Promise<RawOff
     // Serper's raw `link` is the merchant's own page when it is not a
     // Google URL; use it verbatim.
     offer.directUrl = merchantUrl(rawLink);
-    offer.imageUrl = asString(r.imageUrl);
+    offer.imageUrl = cleanImageUrl(asString(r.imageUrl) ?? asString(r.image) ?? asString(r.thumbnail));
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.ratingCount);
     offer.productId = asString(r.productId);
@@ -395,7 +413,7 @@ export async function fetchSearlo(query: string, cfg: AppConfig): Promise<RawOff
     // Searlo's raw `link` is the merchant's own page when it is not a
     // Google URL; use it verbatim.
     offer.directUrl = merchantUrl(rawLink);
-    offer.imageUrl = asString(r.image) ?? asString(r.thumbnail) ?? asString(r.imageUrl);
+    offer.imageUrl = cleanImageUrl(asString(r.image) ?? asString(r.thumbnail) ?? asString(r.imageUrl));
     offer.rating = asNumber(r.rating);
     offer.reviews = asNumber(r.reviews) ?? asNumber(r.ratingCount);
     offer.productId = asString(r.product_id) ?? asString(r.productId);

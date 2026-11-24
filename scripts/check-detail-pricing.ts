@@ -10,6 +10,9 @@ import {
   isDetailRowHidden,
   liveInrPrice,
 } from "../src/lib/detail-pricing";
+import { getProductThumbSource } from "../src/components/Results";
+import { pickGroupImage } from "../src/lib/grouping";
+import { cleanImageUrl } from "../src/lib/providers";
 import type { Offer, RefreshPricesResult } from "../src/lib/types";
 
 let failures = 0;
@@ -230,6 +233,41 @@ check(
   "R2 (c): deltas and lowest are computed over ALL offers including the hidden row",
   r2Rows.some((r) => r.offer.store === "Shopsy" && r.isCheapest === true) &&
   r2Visible.find((r) => r.offer.store === "Nykaa")?.deltaLabel === "+₹405 vs lowest",
+);
+
+/* ------------------- R3: product thumbnail & placeholder checks ------------------- */
+const noThumb = getProductThumbSource(null, false);
+const emptyThumb = getProductThumbSource("", false);
+check(
+  "R3 (a): offer with no thumbnail renders placeholder, not a broken image",
+  noThumb.type === "placeholder" && emptyThumb.type === "placeholder",
+);
+
+const validThumb = getProductThumbSource("https://encrypted-tbn0.gstatic.com/images?q=tbn:xyz", false);
+check(
+  "R3 (b): offer with thumbnail renders thumbnail URL",
+  validThumb.type === "image" && validThumb.src === "https://encrypted-tbn0.gstatic.com/images?q=tbn:xyz",
+);
+
+const failedThumb = getProductThumbSource("https://encrypted-tbn0.gstatic.com/images?q=tbn:xyz", true);
+check(
+  "R3 (c): failed image load falls back to placeholder",
+  failedThumb.type === "placeholder",
+);
+
+const unescapedDataUri = cleanImageUrl("data:image/webp;base64,UklGRv\\x3d\\x3d");
+check(
+  "R3 (d): data URI with JS hex escapes is sanitized to valid base64",
+  unescapedDataUri === "data:image/webp;base64,UklGRv==",
+);
+
+const groupImage = pickGroupImage([
+  { imageUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" },
+  { imageUrl: "https://encrypted-tbn0.gstatic.com/images?q=tbn:abc" },
+]);
+check(
+  "R3 (e): pickGroupImage prioritizes clean https CDN URL over data URI",
+  groupImage === "https://encrypted-tbn0.gstatic.com/images?q=tbn:abc",
 );
 
 console.log(failures === 0 ? "\nAll detail-pricing checks passed." : `\n${failures} check(s) failed.`);

@@ -22,34 +22,79 @@ interface ResultsProps {
   onCompare: () => void;
 }
 
+export function getProductThumbSource(
+  src: string | null | undefined,
+  failed: boolean,
+): { type: "image"; src: string } | { type: "placeholder" } {
+  if (failed || !src || typeof src !== "string") {
+    return { type: "placeholder" };
+  }
+  const trimmed = src.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") {
+    return { type: "placeholder" };
+  }
+  return { type: "image", src: trimmed };
+}
+
+function ProductPlaceholderIcon() {
+  return (
+    <svg
+      width="40%"
+      height="40%"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ opacity: 0.45 }}
+      aria-hidden="true"
+    >
+      <rect x="7" y="9" width="10" height="13" rx="2" />
+      <path d="M10 9V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4" />
+      <line x1="9" y1="5" x2="15" y2="5" />
+      <line x1="12" y1="2" x2="12" y2="4" />
+      <line x1="10" y1="14" x2="14" y2="14" />
+    </svg>
+  );
+}
+
 /** Product thumbnail with a load-failure fallback. Plain img: provider
  *  thumbnails are hotlinked; next/image would need a remote allowlist.
  *  A failed load swaps to the same placeholder tile used when no image
  *  URL exists, so a broken image never shows. Callers key it by src so
  *  a new URL resets the failed state. */
-function ProductThumb({
+export function ProductThumb({
   src,
   imgClass,
   fallbackClass,
   eager = false,
 }: {
-  src: string | null;
+  src: string | null | undefined;
   imgClass: string;
   fallbackClass: string;
   eager?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
-  if (!src || failed) {
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  const thumb = getProductThumbSource(src, failed);
+
+  if (thumb.type === "placeholder") {
     return (
       <div className={fallbackClass} aria-hidden="true">
-        ✦
+        <ProductPlaceholderIcon />
       </div>
     );
   }
+
   return (
     <img
       className={imgClass}
-      src={src}
+      src={thumb.src}
       alt=""
       loading={eager ? "eager" : "lazy"}
       referrerPolicy="no-referrer"
