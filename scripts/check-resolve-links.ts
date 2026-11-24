@@ -37,6 +37,7 @@ let lastSerpApiQuery = "";
 
 let lastSearloQuery = "";
 let lastSearloKey: string | null = null;
+let redirectFetches: string[] = [];
 
 (globalThis as any).fetch = async (input: unknown, init?: any) => {
   const url = String(input);
@@ -52,8 +53,9 @@ let lastSearloKey: string | null = null;
     lastSearloKey = (init?.headers as any)?.["x-api-key"] ?? null;
     return { ok: true, status: 200, url, json: async () => currentSearloPayload };
   }
-  // Any other fetch (a redirect follow): echo the URL, so a Google
+  // Any other fetch (a redirect follow): record it and echo the URL, so a Google
   // URL stays a Google URL and the merchant check rejects it.
+  redirectFetches.push(url);
   return { ok: true, status: 200, url, json: async () => ({}) };
 };
 
@@ -240,6 +242,32 @@ async function main() {
     "Live listing title with descriptor fluff resolves to Shopsy PDP",
     liveTitleHit.directUrl === SHOPSY_PDP,
     `got ${liveTitleHit.directUrl}`
+  );
+
+  /* Case 11 (R1 regression): candidate whose only link is google.com/search?udm=28 returns null and makes ZERO network fetch calls */
+  const SEARCH_RESULTS_URL = "https://www.google.co.in/search?q=The+Ordinary+Niacinamide&udm=28";
+  currentSerpApiPayload = {
+    shopping_results: [
+      {
+        source: "Shopsy",
+        title: "The Ordinary Niacinamide 10% + Zinc 1% Serum 30ml",
+        link: SEARCH_RESULTS_URL,
+        extracted_price: 330,
+      },
+    ],
+  };
+  redirectFetches = [];
+  const searchResultHit = await resolveDirectLink(req, cfg);
+  check(
+    "R1 regression: candidate with google search URL returns null",
+    searchResultHit.directUrl === null,
+    `got ${searchResultHit.directUrl}`
+  );
+  const fetchedSearchUrl = redirectFetches.some((u) => u.includes("google") && u.includes("/search"));
+  check(
+    "R1 regression: zero network fetch calls made for google search URL",
+    !fetchedSearchUrl,
+    `fetched: ${redirectFetches.join(", ")}`
   );
 
   console.log(failures === 0 ? "\nAll resolve-links checks passed." : `\n${failures} check(s) failed.`);

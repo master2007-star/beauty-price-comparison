@@ -168,6 +168,14 @@ function StoreButton({
       return;
     }
 
+    // Open the new tab synchronously within user gesture to prevent popup blocker dismissal
+    let targetTab: Window | null = null;
+    try {
+      targetTab = window.open("about:blank", "_blank");
+    } catch {
+      // If popup blocker already blocked it, continue anyway
+    }
+
     setState("checking");
     try {
       const res = await resolveLinks({
@@ -187,15 +195,26 @@ function StoreButton({
         const cleaned = sanitizeProductUrl(res.directUrl);
         setDirect(cleaned);
         setState("idle");
-        window.open(cleaned, "_blank", "noopener,noreferrer");
+        if (targetTab && !targetTab.closed) {
+          targetTab.location.replace(cleaned);
+        } else {
+          window.open(cleaned, "_blank", "noopener,noreferrer");
+        }
         return;
       }
     } catch {
       // Resolution failed
     }
 
-    // Direct product link could not be verified: surface unavailable state honestly,
-    // never open Google Shopping, generic search pages, or store homepages.
+    // Direct product link could not be verified: close the pre-opened tab and surface
+    // unavailable state honestly, never leaving a blank tab or opening invalid URLs.
+    if (targetTab && !targetTab.closed) {
+      try {
+        targetTab.close();
+      } catch {
+        // Tab could not be closed
+      }
+    }
     setState("nolink");
   }
 

@@ -257,13 +257,29 @@ function destinationFromRedirectParams(u: URL): string | null {
  * http(s) merchant URL, or it is rejected. Never returns a Google URL.
  */
 async function resolveRedirectLink(link: string): Promise<string | null> {
+  let u: URL;
   try {
-    const u = new URL(link);
+    u = new URL(link);
     const dest = destinationFromRedirectParams(u);
     if (dest) return dest;
   } catch {
     return null;
   }
+
+  // Do NOT network-fetch Google search-results pages (google.com/search?...,
+  // including udm=28 / ibp=oshop URLs) — a search page is a results page, not
+  // a redirect, and can never yield a PDP. Only /url, /aclk, /goto (and
+  // adurl-bearing) Google URLs may use the fetch fallback.
+  if (u.hostname.toLowerCase().includes("google")) {
+    const isRedirect =
+      u.pathname.startsWith("/goto") ||
+      u.pathname.includes("/aclk") ||
+      u.pathname === "/url" ||
+      u.pathname.startsWith("/url") ||
+      u.searchParams.has("adurl");
+    if (!isRedirect) return null;
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REDIRECT_TIMEOUT_MS);
   try {
