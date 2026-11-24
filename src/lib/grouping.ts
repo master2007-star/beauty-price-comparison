@@ -850,12 +850,29 @@ export interface GroupSavings {
   comparisonLabel: string;
 }
 
+const IMPORT_STORE_PATTERNS = [
+  /\bubuy\b/i,
+  /\bdesertcart\b/i,
+  /\bgosupps\b/i,
+  /\bkirei\s*bd\b/i,
+];
+
 /**
- * Calculates honest savings for a group, excluding extreme outlier prices.
+ * Recognizes known cross-border/import reseller stores with extreme markups.
+ * Stores without classification (or borderline stores) default to domestic (false).
+ */
+export function isKnownImportStore(store: string | null | undefined): boolean {
+  if (!store) return false;
+  const s = store.trim().toLowerCase();
+  return IMPORT_STORE_PATTERNS.some((pat) => pat.test(s));
+}
+
+/**
+ * Calculates honest savings for a group, excluding extreme outlier prices and import markups.
  *
- * Excludes prices above 3× the group's median price from the max used for the
- * saving calculation, so a wild import listing (e.g. ₹6,947.78 GoSupps import
- * vs ₹600 domestic) does not inflate the saving claim to 91%.
+ * Excludes prices above 3× the group's median price, bimodal gap clusters (>3x ratio),
+ * and excludes known cross-border import stores from the comparison max when at least
+ * 2 domestic prices remain.
  * If fewer than 2 prices remain after outlier exclusion, or all remaining prices
  * come from a single store, no saving is claimed (returns null).
  */
@@ -863,23 +880,24 @@ export function computeGroupSavings(
   offers: Array<{ price: number | null; store: string }>,
   currency: string,
 ): GroupSavings | null {
-  const stores = new Set(offers.map((o) => o.store.toLowerCase()));
+  const stores = new Set(offers.map((o) => (o.store || "").toLowerCase()));
   if (stores.size <= 1) return null;
 
-  const prices = offers
-    .map((o) => o.price)
-    .filter((p): p is number => typeof p === "number" && Number.isFinite(p) && p > 0)
-    .sort((a, b) => a - b);
+  const validOffers = offers
+    .filter((o): o is { price: number; store: string } => typeof o.price === "number" && Number.isFinite(o.price) && o.price > 0)
+    .sort((a, b) => a.price - b.price);
 
-  if (prices.length < 2) return null;
+  if (validOffers.length < 2) return null;
 
-  let validPrices: number[];
+  const prices = validOffers.map((o) => o.price);
+
+  let filteredOffers: Array<{ price: number; store: string }>;
   if (prices.length < 3) {
     const min = prices[0];
     const max = prices[prices.length - 1];
     // For small groups (<3 prices), the median is the midpoint so an outlier
     // drags the median up with it. Use a direct ratio check instead:
-    validPrices = max > 3 * min ? prices.filter((p) => p !== max) : prices;
+    filteredOffers = max > 3 * min ? validOffers.filter((o) => o.price !== max) : validOffers;
   } else {
     // Gap / cluster check for bimodal groups (e.g. domestic cluster + import cluster):
     // find the largest adjacent gap ratio (next / current).
@@ -893,31 +911,44 @@ export function computeGroupSavings(
       }
     }
 
-    let candidates = prices;
+    let candidateOffers = validOffers;
     if (maxRatio > 3 && splitIndex >= 1) {
       // Splits into a lower cluster of at least 2 prices and an upper cluster.
       // Exclude the whole upper cluster from the saving calculation.
-      candidates = prices.slice(0, splitIndex + 1);
+      candidateOffers = validOffers.slice(0, splitIndex + 1);
     }
 
-    if (candidates.length < 2) return null;
+    if (candidateOffers.length < 2) return null;
 
-    if (candidates.length < 3) {
-      const min = candidates[0];
-      const max = candidates[candidates.length - 1];
-      validPrices = max > 3 * min ? candidates.filter((p) => p !== max) : candidates;
+    const candidatePrices = candidateOffers.map((o) => o.price);
+    if (candidateOffers.length < 3) {
+      const min = candidatePrices[0];
+      const max = candidatePrices[candidatePrices.length - 1];
+      filteredOffers = max > 3 * min ? candidateOffers.filter((o) => o.price !== max) : candidateOffers;
     } else {
-      const mid = Math.floor(candidates.length / 2);
-      const median = candidates.length % 2 !== 0 ? candidates[mid] : (candidates[mid - 1] + candidates[mid]) / 2;
+      const mid = Math.floor(candidatePrices.length / 2);
+      const median =
+        candidatePrices.length % 2 !== 0
+          ? candidatePrices[mid]
+          : (candidatePrices[mid - 1] + candidatePrices[mid]) / 2;
       const threshold = 3 * median;
-      validPrices = candidates.filter((p) => p <= threshold);
+      filteredOffers = candidateOffers.filter((o) => o.price <= threshold);
     }
   }
 
-  if (validPrices.length < 2) return null;
+  if (filteredOffers.length < 2) return null;
 
-  const lowest = validPrices[0];
-  const max = validPrices[validPrices.length - 1];
+  const lowest = filteredOffers[0].price;
+
+  // Store-aware comparison rule:
+  // Exclude prices from known-import stores from the comparison max IF at least 2 domestic prices remain.
+  // If fewer than 2 domestic prices remain, fall back to the existing behaviour (current max).
+  const domesticOffers = filteredOffers.filter((o) => !isKnownImportStore(o.store));
+  let max = filteredOffers[filteredOffers.length - 1].price;
+  if (domesticOffers.length >= 2) {
+    max = domesticOffers[domesticOffers.length - 1].price;
+  }
+
   const savings = Math.round((max - lowest) * 100) / 100;
   if (savings <= 0 || max <= 0) return null;
 

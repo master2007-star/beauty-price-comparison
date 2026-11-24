@@ -830,5 +830,35 @@ check(
   `savings=${bimodalOutlier?.savings} savingsPercent=${bimodalOutlier?.savingsPercent}`,
 );
 
+/* Store-aware import outlier checks */
+const syntheticImportSavings = computeGroupSavings([
+  { price: 330, store: "Shopsy" },
+  { price: 600, store: "Amazon.in" },
+  { price: 600, store: "Ajio" },
+  { price: 3315, store: "ubuy.co.in" },
+  { price: 6971.44, store: "GoSupps Beauty" },
+], "INR");
+check(
+  "saving outlier (synthetic import): import stores excluded from comparison max → comparisonPrice 600, savings 270, 45%",
+  syntheticImportSavings !== null &&
+    syntheticImportSavings.comparisonPrice === 600 &&
+    syntheticImportSavings.savings === 270 &&
+    syntheticImportSavings.savingsPercent === 45,
+  `comparisonPrice=${syntheticImportSavings?.comparisonPrice} savings=${syntheticImportSavings?.savings} savingsPercent=${syntheticImportSavings?.savingsPercent}`,
+);
+
+const importOnlyGroup = computeGroupSavings([
+  { price: 3000, store: "ubuy.co.in" },
+  { price: 3500, store: "GoSupps" },
+], "INR");
+check(
+  "saving outlier (import-only group): falls back to existing behaviour, not null from store rule",
+  importOnlyGroup !== null &&
+    importOnlyGroup.comparisonPrice === 3500 &&
+    importOnlyGroup.savings === 500 &&
+    importOnlyGroup.savingsPercent === 14,
+  `got ${JSON.stringify(importOnlyGroup)}`,
+);
+
 console.log(failures === 0 ? "\nAll grouping checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
