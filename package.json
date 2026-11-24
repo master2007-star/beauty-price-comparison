@@ -21,6 +21,7 @@
     "build": "next build",
     "check-price-history": "tsx scripts/check-price-history.ts",
     "check:beauty-filter": "tsx scripts/check-beauty-filter.ts",
+    "check:detail-pricing": "tsx scripts/check-detail-pricing.ts",
     "check:gemini": "tsx scripts/check-gemini.ts",
     "check:grouping": "tsx scripts/check-grouping.ts",
     "check:live-price": "tsx scripts/check-live-price.ts",

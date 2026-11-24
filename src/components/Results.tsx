@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { refreshPrices, resolveLinks } from "@/lib/client-api";
+import { applyLivePrices } from "@/lib/detail-pricing";
 import { formatPrice } from "@/lib/format";
 import { computeGroupSavings } from "@/lib/grouping";
 import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
@@ -226,7 +227,11 @@ function StoreButton({
  *  showTitles is set, a row whose listing title differs from the group
  *  title shows it, so the shopper can confirm it is the same variant.
  *  Rows with a refreshed live price (INR only) show it with a LIVE
- *  badge; every other row keeps its Google snapshot price silently. */
+ *  badge; every other row keeps its Google snapshot price silently.
+ *  Once any live price resolves, the rows re-sort by their effective
+ *  (live-or-server) price and the cheapest flag + deltas recompute
+ *  against the live lowest (see src/lib/detail-pricing.ts); until then
+ *  the server order and server deltas stand. */
 function StoreRows({
   group,
   showTitles = false,
@@ -236,23 +241,26 @@ function StoreRows({
   showTitles?: boolean;
   livePrices?: Record<string, RefreshPricesResult>;
 }) {
+  const rows = useMemo(
+    () => applyLivePrices(group.offers, livePrices, group.currency),
+    [group, livePrices],
+  );
   return (
     <div className="store-rows">
-      {group.offers.map((offer, i) => {
-        const key = `${offer.store}-${offer.price}-${i}`;
-        const live = livePrices[key];
-        const livePrice =
-          live && live.status === "live" && live.currency === "INR" ? live.livePrice : null;
+      {rows.map((row) => {
+        const { offer, live } = row;
+        const key = `${offer.store}-${offer.price}-${row.index}`;
+        const livePrice = row.isLive ? row.effectivePrice : null;
         return (
           <div className="store-row" key={key}>
             <span className="store-name">{offer.store}</span>
             <span className="store-via">via {PROVIDER_LABELS[offer.provider]}</span>
-            {offer.isCheapest ? <span className="flag-cheapest">Lowest</span> : null}
+            {row.isCheapest ? <span className="flag-cheapest">Lowest</span> : null}
             <span className="store-price">
               {livePrice !== null ? formatPrice(livePrice, "INR") : offer.priceLabel}
             </span>
             {livePrice !== null ? <span className="flag-live">Live</span> : null}
-            {offer.deltaLabel ? <span className="delta">{offer.deltaLabel}</span> : null}
+            {row.deltaLabel ? <span className="delta">{row.deltaLabel}</span> : null}
             <StoreButton offer={offer} groupOffers={group.offers} warmedDirectUrl={live?.directUrl} />
             {showTitles && offer.title !== group.title ? (
               <span className="store-listed-as">Listed as “{offer.title}”</span>
