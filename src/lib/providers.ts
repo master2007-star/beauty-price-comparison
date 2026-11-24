@@ -17,6 +17,7 @@
 import { coercePrice, detectCurrency, defaultCurrencyForRegion } from "./format";
 import type { AppConfig } from "./env";
 import type { ProviderId, RawOffer } from "./types";
+import { isDirectProductUrl, sanitizeProductUrl } from "./url";
 
 const FETCH_TIMEOUT_MS = 20_000;
 
@@ -138,24 +139,15 @@ function immersiveTokenFromApiUrl(url: string | null): string | null {
 }
 
 /**
- * Merchant-URL check, mirroring the host check in resolve.ts: returns the
- * raw value unchanged when it is an absolute http(s) URL whose host is
- * not a Google host, and null otherwise. A host counts as Google when it
- * contains "google" anywhere, which covers google.com, google.co.in,
- * googleadservices.com and googlesyndication.com. The value is never
- * constructed, rewritten or guessed — only the provider's own raw `link`
- * is ever returned.
+ * Merchant product URL check: ensures raw links from providers point to
+ * an actual merchant product page, rather than Google redirect URLs,
+ * store homepages, or generic search results pages. Safe tracking parameters
+ * are stripped without modifying the destination product path.
  */
 function merchantUrl(value: string | null): string | null {
   if (!value) return null;
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    if (parsed.hostname.toLowerCase().includes("google")) return null;
-    return value;
-  } catch {
-    return null;
-  }
+  if (!isDirectProductUrl(value)) return null;
+  return sanitizeProductUrl(value);
 }
 
 function baseOffer(provider: ProviderId): RawOffer {

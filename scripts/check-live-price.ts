@@ -5,6 +5,7 @@
  * Run: npm run check:live-price
  */
 import { extractAmazonPrice, extractJsonLdPrice } from "../src/lib/live-price";
+import { isDirectProductUrl, sanitizeProductUrl } from "../src/lib/url";
 
 let failures = 0;
 
@@ -277,6 +278,55 @@ check(
       `<div id="corePrice_feature_div"><span class="a-price"><span class="a-price-symbol">₹</span><span class="a-price-whole">1,299</span><span class="a-price-fraction">50</span></span></div>`,
     ),
   )?.price === 1299.5,
+);
+
+/* ------------------- Direct product URL resolution -------------------- */
+
+check(
+  "valid merchant product page is recognized",
+  isDirectProductUrl("https://www.nykaa.com/the-ordinary-niacinamide-10-zinc-1/p/5000000?skuId=5000000") === true,
+);
+
+check(
+  "Amazon product /dp/ ASIN link is recognized",
+  isDirectProductUrl("https://www.amazon.in/dp/B07797NC2C") === true,
+);
+
+check(
+  "Maccaron product page is recognized",
+  isDirectProductUrl("https://maccaron.in/en/products/the-ordinary-niacinamide-10-zinc-1-30ml/12345/") === true,
+);
+
+check(
+  "store root homepage is rejected",
+  isDirectProductUrl("https://www.nykaa.com/") === false &&
+  isDirectProductUrl("https://amazon.in") === false,
+);
+
+check(
+  "localized homepage is rejected",
+  isDirectProductUrl("https://maccaron.in/en/") === false &&
+  isDirectProductUrl("https://maccaron.in/en") === false,
+);
+
+check(
+  "generic store search page is rejected",
+  isDirectProductUrl("https://store.com/search?q=niacinamide") === false &&
+  isDirectProductUrl("https://www.amazon.in/s?k=serum") === false &&
+  isDirectProductUrl("https://store.com/catalogsearch/result/?q=cleanser") === false,
+);
+
+check(
+  "Google Shopping and Google redirect URLs are rejected",
+  isDirectProductUrl("https://www.google.com/shopping/product/123456") === false &&
+  isDirectProductUrl("https://googleadservices.com/pagead/aclk?sa=L&ai=123") === false,
+);
+
+check(
+  "sanitizeProductUrl strips tracking params while preserving product identifiers",
+  sanitizeProductUrl(
+    "https://store.com/products/serum?variant=123&utm_source=google&utm_medium=cpc&gclid=xyz&skuId=999"
+  ) === "https://store.com/products/serum?variant=123&skuId=999",
 );
 
 console.log(failures === 0 ? "\nAll live-price checks passed." : `\n${failures} check(s) failed.`);

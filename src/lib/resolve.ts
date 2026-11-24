@@ -45,6 +45,7 @@
 import type { AppConfig } from "./env";
 import { pricesEqual, storesMatch } from "./format";
 import type { ProviderId, ResolveLinksRequest, ResolveLinksResponse } from "./types";
+import { isDirectProductUrl, sanitizeProductUrl } from "./url";
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_TOKENS = 3;
@@ -121,20 +122,11 @@ function failureDetail(outcome: FetchOutcome): string {
 }
 
 /**
- * Merchant-URL check, mirroring providers.ts: a host counts as Google
- * when it contains "google" anywhere, which covers google.com,
- * google.co.in, googleadservices.com and googlesyndication.com. An
- * endsWith check is NOT enough — googleadservices.com does not end
- * with "google.com", and treating its ad redirects as merchant URLs
- * sent users to Google's bot check instead of the store.
+ * Direct merchant product URL check: rejects Google URLs, store homepages,
+ * and generic search pages to ensure outbound links land on the exact product.
  */
 function isMerchantUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return !host.includes("google");
-  } catch {
-    return false;
-  }
+  return isDirectProductUrl(url);
 }
 
 interface SellerCandidate {
@@ -206,7 +198,7 @@ function evaluateSeller(
       return null;
     }
   }
-  return { name, link, price };
+  return { name, link: sanitizeProductUrl(link), price };
 }
 
 const REDIRECT_TIMEOUT_MS = 4_000;
@@ -244,7 +236,7 @@ async function resolveRedirectLink(link: string): Promise<string | null> {
     if (adurl) {
       let dest = adurl;
       try { dest = decodeURIComponent(dest); } catch { /* keep single-decoded */ }
-      if (isMerchantUrl(dest)) return dest;
+      if (isMerchantUrl(dest)) return sanitizeProductUrl(dest);
     }
   } catch {
     return null;
@@ -258,7 +250,7 @@ async function resolveRedirectLink(link: string): Promise<string | null> {
       signal: controller.signal,
       headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" },
     });
-    return isMerchantUrl(res.url) ? res.url : null;
+    return isMerchantUrl(res.url) ? sanitizeProductUrl(res.url) : null;
   } catch {
     return null;
   } finally {
@@ -549,7 +541,7 @@ function noMatchReason(
  * fetch.
  */
 async function resolveOfferRedirect(productUrl: string): Promise<string | null> {
-  if (isMerchantUrl(productUrl)) return productUrl;
+  if (isMerchantUrl(productUrl)) return sanitizeProductUrl(productUrl);
   let u: URL;
   try {
     u = new URL(productUrl);
