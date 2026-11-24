@@ -30,9 +30,11 @@ export async function POST(req: Request) {
   // A Google redirect product URL alone is enough: the resolver can
   // follow it server-side to the merchant page.
   const hasLink = Boolean(body.productUrl);
-  if (!hasId && !hasToken && !hasLink) {
+  // Identity-free offers can still use the guarded title + retailer fallback.
+  const hasTitleAndStore = Boolean(body.title?.trim() && body.store?.trim());
+  if (!hasId && !hasToken && !hasLink && !hasTitleAndStore) {
     return NextResponse.json(
-      { directUrl: null, matchedStore: null, source: null, reason: "No product id, token or link provided." },
+      { directUrl: null, matchedStore: null, source: null, reason: "No product id, token, link, or title-and-retailer pair provided." },
       { status: 200 },
     );
   }

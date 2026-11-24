@@ -135,7 +135,8 @@ function StoreButton({
   const canResolve =
     hasIdentity ||
     (Boolean(warmedDirectUrl) && isDirectProductUrl(warmedDirectUrl)) ||
-    (Boolean(offer.productUrl) && isOpenableUrl(offer.productUrl));
+    (Boolean(offer.productUrl) && isOpenableUrl(offer.productUrl)) ||
+    (Boolean(offer.title?.trim()) && Boolean(offer.store?.trim()));
 
   async function go() {
     // A confirmed merchant product link opens synchronously — no await, no
@@ -166,6 +167,7 @@ function StoreButton({
         productTokens: pool.productTokens,
         immersiveTokens: pool.immersiveTokens,
         productUrl: offer.productUrl ?? undefined,
+        title: offer.title,
         store: offer.store,
         price: offer.price,
       });
@@ -651,6 +653,7 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
         productTokens: pool.productTokens,
         immersiveTokens: pool.immersiveTokens,
         productUrl: offer.productUrl ?? undefined,
+        title: offer.title,
       };
     });
     refreshPrices({ items }, controller.signal)

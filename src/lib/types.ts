@@ -133,6 +133,8 @@ export interface ResolveLinksRequest {
    *  merchant page where possible. Never a client-invented URL — it
    *  comes from the provider's own search result. */
   productUrl?: string;
+  /** Exact clicked-offer title, used only for a guarded final merchant search fallback. */
+  title?: string;
   store?: string;
   price?: number;
 }
@@ -164,6 +166,8 @@ export interface RefreshPricesItem {
    *  passed through so the resolver can follow a Google redirect to
    *  the merchant page when the token routes fail. */
   productUrl?: string;
+  /** Exact row title, used only for a guarded final merchant search fallback. */
+  title?: string;
 }
 
 export interface RefreshPricesResult {

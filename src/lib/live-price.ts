@@ -401,6 +401,7 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
         productTokens: item.productTokens,
         immersiveTokens: item.immersiveTokens,
         productUrl: item.productUrl,
+        title: item.title,
         store: item.store,
         price: item.price,
       },

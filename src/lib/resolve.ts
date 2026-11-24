@@ -531,6 +531,64 @@ function noMatchReason(
 }
 
 /**
+ * Conservative title comparison for the identity-free final fallback.
+ * Requires substantial overlap and at least two meaningful terms so a
+ * broad category result cannot be mistaken for the clicked product.
+ */
+function titleMatches(wanted: string, candidate: string): boolean {
+  const ignored = new Set(["the", "and", "for", "with", "from", "new", "best", "buy", "online", "ml", "gm", "g", "kg"]);
+  const words = (value: string) => new Set(
+    value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/)
+      .filter((word) => word.length > 1 && !ignored.has(word) && !/^\d+$/.test(word)),
+  );
+  const a = words(wanted);
+  const b = words(candidate);
+  if (a.size < 2 || b.size < 2) return false;
+  let overlap = 0;
+  for (const word of a) if (b.has(word)) overlap += 1;
+  return overlap >= 2 && overlap / Math.min(a.size, b.size) >= 0.65;
+}
+
+/**
+ * Last-resort lookup for offers from providers that supply no usable
+ * product token or ID (notably some Serper/Searlo results). The query is
+ * constrained to the exact offer title and merchant, and a hit is only
+ * accepted when BOTH the merchant and title match and `link` itself is
+ * a validated direct product page. `product_link` is deliberately never
+ * used because it is commonly a Google Shopping URL.
+ */
+async function viaSerpApiExactOfferSearch(
+  title: string,
+  store: string,
+  cfg: AppConfig,
+): Promise<SellerCandidate | null> {
+  const key = cfg.keys.serpapi;
+  if (!key || !title.trim() || !store.trim()) return null;
+  const params = new URLSearchParams({
+    engine: "google_shopping",
+    q: `${title} ${store}`,
+    google_domain: "google.co.in",
+    gl: cfg.region,
+    hl: cfg.language,
+    api_key: key,
+  });
+  const outcome = await fetchJson(`https://serpapi.com/search.json?${params}`, {});
+  if (!outcome.json || outcome.apiError) return null;
+  for (const item of asArray(outcome.json.shopping_results).slice(0, 20)) {
+    const result = asRecord(item);
+    if (!result) continue;
+    const name = asString(result.source) ?? asString(result.seller) ?? asString(result.merchant);
+    const candidateTitle = asString(result.title) ?? asString(result.name);
+    const link = asString(result.link);
+    if (!name || !candidateTitle || !link) continue;
+    if (!storesMatch(name, store) || !titleMatches(title, candidateTitle)) continue;
+    if (!isMerchantUrl(link)) continue;
+    return { name, link: sanitizeProductUrl(link), price: asNumber(result.extracted_price) ?? asNumber(result.price) };
+  }
+  return null;
+}
+
+/**
  * The merchant destination of the clicked offer's own product URL, or
  * null. A URL that is already a merchant URL is returned as-is; a
  * Google redirect (/goto, /aclk, /url, or an adurl param) is followed
@@ -603,6 +661,12 @@ export async function resolveDirectLink(
   if (req.productUrl) {
     const resolved = await resolveOfferRedirect(req.productUrl);
     if (resolved) return { directUrl: resolved, matchedStore: req.store ?? null, source: null };
+  }
+  // Last resort: only identity-free offers with both a title and store
+  // can enter this path. A direct merchant PDP must pass both gates.
+  if (req.title && req.store) {
+    const hit = await viaSerpApiExactOfferSearch(req.title, req.store, cfg);
+    if (hit) return { directUrl: hit.link, matchedStore: hit.name, source: "serpapi" satisfies ProviderId };
   }
   return { directUrl: null, matchedStore: null, source: null, reason: noMatchReason(req, cfg, serpAttempt, searchAttempt, pageAttempt) };
 }
