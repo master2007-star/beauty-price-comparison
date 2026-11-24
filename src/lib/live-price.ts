@@ -270,12 +270,14 @@ async function fetchPageText(url: string): Promise<{ html: string; finalUrl: str
   try {
     const res = await fetch(url, {
       method: "GET",
+      cache: "no-store",
       redirect: "follow",
       signal: controller.signal,
       headers: {
         "user-agent": BROWSER_UA,
         accept: "text/html,application/xhtml+xml",
         "accept-language": "en-IN,en;q=0.9",
+        "cache-control": "no-cache",
       },
     });
     if (!res.ok || !res.body) return null;
@@ -389,6 +391,7 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
     status: "unavailable",
     livePrice: null,
     currency: null,
+    verifiedAt: null,
   };
   try {
     const resolved = await resolveDirectLink(
@@ -415,9 +418,10 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
     // server-resolved URL only (see the SSRF rules above).
     const warmed = { directUrl: url };
     const page = await fetchPageText(url);
-    if (!page) return { ...unavailable, ...warmed };
-    const found = extractJsonLdPrice(page.html);
-    if (found) return { key: item.key, status: "live", livePrice: found.price, currency: found.currency, ...warmed };
+    if (!page) {
+      return { key: item.key, status: "unverified", livePrice: null, currency: null, verifiedAt: null, ...warmed };
+    }
+    let found = extractJsonLdPrice(page.html);
     // Amazon PDPs carry no JSON-LD price: twister extraction, then the
     // SerpApi amazon_product fallback. Host-gated on the FINAL URL —
     // the Amazon extractor must never run on a non-Amazon page.
@@ -427,17 +431,43 @@ async function refreshOne(item: RefreshPricesItem, cfg: AppConfig): Promise<Refr
     } catch {
       finalHost = "";
     }
-    if (finalHost === "amazon.in" || finalHost.endsWith(".amazon.in")) {
+    if (!found && (finalHost === "amazon.in" || finalHost.endsWith(".amazon.in"))) {
       const amazon = extractAmazonPrice(page.html);
       if (amazon) {
-        return { key: item.key, status: "live", livePrice: amazon.price, currency: amazon.currency, ...warmed };
-      }
-      const viaApi = await fetchAmazonProductPrice(url, page.finalUrl, cfg);
-      if (viaApi) {
-        return { key: item.key, status: "live", livePrice: viaApi.price, currency: viaApi.currency, ...warmed };
+        found = amazon;
+      } else {
+        const viaApi = await fetchAmazonProductPrice(url, page.finalUrl, cfg);
+        if (viaApi) found = viaApi;
       }
     }
-    return { ...unavailable, ...warmed };
+
+    if (found && found.price > 0) {
+      // Validate extracted price against expected offer price:
+      // If the page price diverges wildly (> 2.0x higher or < 0.4x lower),
+      // e.g. page opened 1L at ₹1747 for a 118ml ₹362 offer, do not treat as live.
+      if (item.price && item.price > 0) {
+        if (found.price > item.price * 2.0 || found.price < item.price / 2.0) {
+          return {
+            key: item.key,
+            status: "unverified",
+            livePrice: null,
+            currency: null,
+            verifiedAt: null,
+            ...warmed,
+          };
+        }
+      }
+      return {
+        key: item.key,
+        status: "live",
+        livePrice: found.price,
+        currency: found.currency ?? "INR",
+        verifiedAt: new Date().toISOString(),
+        ...warmed,
+      };
+    }
+
+    return { key: item.key, status: "unverified", livePrice: null, currency: null, verifiedAt: null, ...warmed };
   } catch {
     return unavailable;
   }
@@ -458,6 +488,6 @@ export async function refreshLivePrices(
   return settled.map((outcome, i) =>
     outcome.status === "fulfilled"
       ? outcome.value
-      : { key: capped[i].key, status: "unavailable", livePrice: null, currency: null },
+      : { key: capped[i].key, status: "unavailable", livePrice: null, currency: null, verifiedAt: null },
   );
 }

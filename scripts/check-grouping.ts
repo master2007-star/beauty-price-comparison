@@ -830,6 +830,18 @@ check(
   `savings=${bimodalOutlier?.savings} savingsPercent=${bimodalOutlier?.savingsPercent}`,
 );
 
+/* ------------- live regression: Cetaphil 118ml, 1L and unstated mini sizes split ------------- */
+const cetaphilVariantSplit = buildGroups(dedupeOffers([
+  offer({ title: "Cetaphil Gentle Skin Cleanser", store: "Nykaa", price: 197 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 118ml", store: "Amazon.in", price: 362 }),
+  offer({ title: "Cetaphil Gentle Skin Cleanser 1L", store: "Nykaa", price: 1747 }),
+]), "INR");
+check(
+  "Cetaphil: 118ml (₹362), 1L (₹1747) and ₹197 mini split into 3 distinct groups",
+  cetaphilVariantSplit.length === 3,
+  `got ${cetaphilVariantSplit.length} groups`,
+);
+
 /* Store-aware import outlier checks */
 const syntheticImportSavings = computeGroupSavings([
   { price: 330, store: "Shopsy" },

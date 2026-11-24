@@ -44,6 +44,7 @@
  */
 import type { AppConfig } from "./env";
 import { pricesEqual, storesMatch } from "./format";
+import { extractSize, sizesMatch } from "./grouping";
 import type { ProviderId, ResolveLinksRequest, ResolveLinksResponse } from "./types";
 import { isDirectProductUrl, sanitizeProductUrl } from "./url";
 
@@ -188,12 +189,12 @@ function evaluateSeller(
 ): SellerCandidate | null {
   attempt.sellersSeen += 1;
   if (store && !storesMatch(name, store)) return null;
-  if (wantedPrice !== undefined) {
+  if (wantedPrice !== undefined && wantedPrice > 0) {
     if (price === null) {
       attempt.nameMatchedNoPrice ??= name;
       return null;
     }
-    if (!pricesEqual(price, wantedPrice)) {
+    if (price > wantedPrice * 1.5 || price < wantedPrice / 1.5) {
       attempt.priceMismatch ??= { name, sellerPrice: price };
       return null;
     }
@@ -279,6 +280,7 @@ async function viaSerpApiImmersive(
   tokens: string[],
   store: string | undefined,
   cfg: AppConfig,
+  wantedPrice?: number,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
   const key = cfg.keys.serpapi;
@@ -340,12 +342,12 @@ async function viaSerpApiImmersive(
         // the caller falls back honestly to the Google Shopping page.
         if (!finalUrl) continue;
         const p = asNumber(r.extracted_price) ?? asNumber(r.price);
-        const hit = evaluateSeller(name, finalUrl, p, store, undefined, attempt);
+        const hit = evaluateSeller(name, finalUrl, p, store, wantedPrice, attempt);
         if (hit) return { hit, attempt };
         continue;
       }
       const p = asNumber(r.extracted_price) ?? asNumber(r.price);
-      const hit = evaluateSeller(name, link, p, store, undefined, attempt);
+      const hit = evaluateSeller(name, link, p, store, wantedPrice, attempt);
       if (hit) return { hit, attempt };
     }
   }
@@ -362,6 +364,7 @@ async function viaSearchApi(
   tokens: string[],
   store: string | undefined,
   cfg: AppConfig,
+  wantedPrice?: number,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
   const key = cfg.keys.searchapi;
@@ -391,7 +394,7 @@ async function viaSearchApi(
       if (!name || !link) { attempt.missingFields += 1; continue; }
       if (!isMerchantUrl(link)) { attempt.googleRedirectLinks += 1; continue; }
       const p = asNumber(r.extracted_price);
-      const hit = evaluateSeller(name, link, p, store, undefined, attempt);
+      const hit = evaluateSeller(name, link, p, store, wantedPrice, attempt);
       if (hit) return { hit, attempt };
     }
   }
@@ -433,6 +436,7 @@ async function viaSearchApiProductPage(
   ids: string[],
   store: string | undefined,
   cfg: AppConfig,
+  wantedPrice?: number,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
   const key = cfg.keys.searchapi;
@@ -456,7 +460,7 @@ async function viaSearchApiProductPage(
   const token = asString(product?.product_token) ?? asString(outcome.json.product_token);
   if (!token) return { hit: null, attempt };
   attempt.tokensMinted += 1;
-  const offers = await viaSearchApi([token], store, cfg);
+  const offers = await viaSearchApi([token], store, cfg, wantedPrice);
   mergeAttempts(attempt, offers.attempt);
   return { hit: offers.hit, attempt };
 }
@@ -536,10 +540,16 @@ function noMatchReason(
  * broad category result cannot be mistaken for the clicked product.
  */
 function titleMatches(wanted: string, candidate: string): boolean {
-  const ignored = new Set(["the", "and", "for", "with", "from", "new", "best", "buy", "online", "ml", "gm", "g", "kg"]);
+  // Strict size validation: never treat 118ml and 1L as matching
+  const wSize = extractSize(wanted);
+  const cSize = extractSize(candidate);
+  if (wSize && cSize && !sizesMatch(wSize, cSize)) return false;
+  if (wSize && !cSize) return false;
+
+  const ignored = new Set(["the", "and", "for", "with", "from", "new", "best", "buy", "online"]);
   const words = (value: string) => new Set(
     value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/)
-      .filter((word) => word.length > 1 && !ignored.has(word) && !/^\d+$/.test(word)),
+      .filter((word) => word.length > 1 && !ignored.has(word)),
   );
   const a = words(wanted);
   const b = words(candidate);
@@ -561,6 +571,7 @@ async function viaSerpApiExactOfferSearch(
   title: string,
   store: string,
   cfg: AppConfig,
+  wantedPrice?: number,
 ): Promise<SellerCandidate | null> {
   const key = cfg.keys.serpapi;
   if (!key || !title.trim() || !store.trim()) return null;
@@ -583,7 +594,11 @@ async function viaSerpApiExactOfferSearch(
     if (!name || !candidateTitle || !link) continue;
     if (!storesMatch(name, store) || !titleMatches(title, candidateTitle)) continue;
     if (!isMerchantUrl(link)) continue;
-    return { name, link: sanitizeProductUrl(link), price: asNumber(result.extracted_price) ?? asNumber(result.price) };
+    const candPrice = asNumber(result.extracted_price) ?? asNumber(result.price);
+    if (wantedPrice && candPrice && wantedPrice > 0) {
+      if (candPrice > wantedPrice * 1.5 || candPrice < wantedPrice / 1.5) continue;
+    }
+    return { name, link: sanitizeProductUrl(link), price: candPrice };
   }
   return null;
 }
@@ -639,17 +654,17 @@ export async function resolveDirectLink(
   let searchAttempt = emptyAttempt();
   let pageAttempt = emptyAttempt();
   if (immersiveTokens.length > 0 && cfg.keys.serpapi) {
-    const r = await viaSerpApiImmersive(immersiveTokens, req.store, cfg);
+    const r = await viaSerpApiImmersive(immersiveTokens, req.store, cfg, req.price);
     serpAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "serpapi" satisfies ProviderId };
   }
   if (tokens.length > 0 && cfg.keys.searchapi) {
-    const r = await viaSearchApi(tokens, req.store, cfg);
+    const r = await viaSearchApi(tokens, req.store, cfg, req.price);
     searchAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
   }
   if (immersiveTokens.length === 0 && tokens.length === 0 && ids.length > 0 && cfg.keys.searchapi) {
-    const r = await viaSearchApiProductPage(ids, req.store, cfg);
+    const r = await viaSearchApiProductPage(ids, req.store, cfg, req.price);
     pageAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
   }
@@ -665,7 +680,7 @@ export async function resolveDirectLink(
   // Last resort: only identity-free offers with both a title and store
   // can enter this path. A direct merchant PDP must pass both gates.
   if (req.title && req.store) {
-    const hit = await viaSerpApiExactOfferSearch(req.title, req.store, cfg);
+    const hit = await viaSerpApiExactOfferSearch(req.title, req.store, cfg, req.price);
     if (hit) return { directUrl: hit.link, matchedStore: hit.name, source: "serpapi" satisfies ProviderId };
   }
   return { directUrl: null, matchedStore: null, source: null, reason: noMatchReason(req, cfg, serpAttempt, searchAttempt, pageAttempt) };

@@ -157,9 +157,13 @@ export interface VariantSignature {
   forms: Set<string>;
 }
 
-export function variantSignature(title: string): VariantSignature {
+export function variantSignature(title: string, productUrl?: string | null): VariantSignature {
+  let size = extractSize(title);
+  if (!size && productUrl) {
+    size = extractSize(productUrl);
+  }
   return {
-    size: extractSize(title),
+    size,
     multipack: extractMultipack(title),
     spf: extractSpf(title),
     forms: extractForms(title),
@@ -964,6 +968,40 @@ export function computeGroupSavings(
   };
 }
 
+/**
+ * Verify variant compatibility between candidate and cluster:
+ * 1. Stated sizes must agree across all members with stated sizes.
+ * 2. When one side lacks a stated size, price difference must not exceed 45%
+ *    (prevents merging 50ml/125ml at ₹197 with 118ml at ₹362 or 1L at ₹1747).
+ */
+function variantPriceCompatible(candidate: PreparedOffer, cluster: PreparedOffer[]): boolean {
+  const cSize = candidate.variant.size;
+  const clusterSizes = cluster.map((m) => m.variant.size).filter((s): s is SizeInfo => s !== null);
+
+  // If both have stated sizes, ensure candidate matches all stated sizes in cluster
+  if (cSize && clusterSizes.length > 0) {
+    if (!clusterSizes.every((s) => sizesMatch(cSize, s))) return false;
+  }
+
+  // When there is an asymmetry (one side has stated size and the other does not):
+  // Check price bounds to avoid grouping different volumes (e.g. ₹197 vs ₹362 or ₹1747).
+  const hasSizeAsymmetry =
+    (cSize === null && clusterSizes.length > 0) || (cSize !== null && clusterSizes.length === 0);
+
+  if (hasSizeAsymmetry && candidate.offer.price > 0) {
+    const clusterPrices = cluster.map((m) => m.offer.price).filter((p) => p > 0);
+    if (clusterPrices.length > 0) {
+      const minP = Math.min(...clusterPrices);
+      const maxP = Math.max(...clusterPrices);
+      if (candidate.offer.price > maxP * 1.45 || candidate.offer.price < minP / 1.45) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 export function buildGroups(
   rawOffers: RawOffer[],
   fallbackCurrency: string,
@@ -973,7 +1011,7 @@ export function buildGroups(
   const priced: PreparedOffer[] = [];
   for (const raw of rawOffers) {
     const offer = toOffer(raw, currency);
-    if (offer) priced.push({ offer, variant: variantSignature(offer.title) });
+    if (offer) priced.push({ offer, variant: variantSignature(offer.title, offer.productUrl) });
   }
   // Deterministic order so grouping is stable run to run.
   priced.sort((x, y) =>
@@ -1015,6 +1053,7 @@ export function buildGroups(
       if (
         seedLineAgrees(candidate, seed) &&
         sizeLineOk(candidate, seed) &&
+        variantPriceCompatible(candidate, cluster) &&
         cluster.some((member) => offersMatch(candidate, member, queryBrand)) &&
         cluster.every(
           (member) =>

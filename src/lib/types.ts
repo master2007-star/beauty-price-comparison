@@ -172,7 +172,7 @@ export interface RefreshPricesItem {
 
 export interface RefreshPricesResult {
   key: string;
-  status: "live" | "unavailable";
+  status: "live" | "unverified" | "unavailable";
   livePrice: number | null;
   currency: string | null;
   /** The server-resolved store page URL for this row, when the
@@ -181,6 +181,8 @@ export interface RefreshPricesResult {
    *  resolve round-trip. Never a client-supplied URL and never a
    *  Google Shopping productUrl. */
   directUrl?: string;
+  /** ISO timestamp when the retailer price was verified. */
+  verifiedAt?: string | null;
 }
 
 export interface RefreshPricesRequest {

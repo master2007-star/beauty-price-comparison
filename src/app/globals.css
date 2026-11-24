@@ -1912,6 +1912,24 @@ img.bento-photo {
   border-radius: 999px;
 }
 
+.flag-unverified {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.verified-time {
+  font-size: 0.72rem;
+  color: var(--muted, #6b7280);
+}
+
 .offer-row {
   display: flex;
   gap: 14px;

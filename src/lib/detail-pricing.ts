@@ -27,6 +27,10 @@ export interface DetailRow {
   live?: RefreshPricesResult;
   /** True when a live INR price resolved for this row. */
   isLive: boolean;
+  /** True when the retailer price could not be verified or differed from expected variant. */
+  isUnverified: boolean;
+  /** ISO timestamp when the retailer price was verified. */
+  verifiedAt: string | null;
   /** Live INR price when resolved, otherwise the server price. */
   effectivePrice: number;
   /** True for the cheapest row after live prices are applied. */
@@ -65,11 +69,14 @@ export function applyLivePrices(
   const rows: DetailRow[] = offers.map((offer, index) => {
     const live = livePrices[detailRowKey(offer, index)];
     const livePrice = liveInrPrice(live);
+    const isUnverified = Boolean(live && (live.status === "unverified" || (live.status === "unavailable" && live.directUrl)));
     return {
       offer,
       index,
       live,
       isLive: livePrice !== null,
+      isUnverified,
+      verifiedAt: live?.verifiedAt ?? null,
       effectivePrice: livePrice ?? offer.price,
       isCheapest: offer.isCheapest ?? false,
       deltaLabel: offer.deltaLabel ?? null,

@@ -151,5 +151,37 @@ check(
 check("liveInrPrice rejects non-INR", liveInrPrice(live("k", 12.56, "USD")) === null);
 check("liveInrPrice rejects unavailable", liveInrPrice(unavailable1[detailRowKey(server1[1], 1)]) === null);
 
+/* ------------------- unverified / mismatch status ------------------- */
+const unverifiedLive: Record<string, RefreshPricesResult> = {
+  [detailRowKey(server1[1], 1)]: {
+    key: detailRowKey(server1[1], 1),
+    status: "unverified",
+    livePrice: null,
+    currency: null,
+    directUrl: "https://example.com/p/unverified",
+  },
+};
+const rowsUnverified = applyLivePrices(server1, unverifiedLive, "INR");
+check(
+  "unverified row flags isUnverified=true and keeps snapshot price",
+  rowsUnverified[1].isUnverified === true && rowsUnverified[1].effectivePrice === 1199,
+);
+
+const verifiedLive: Record<string, RefreshPricesResult> = {
+  [detailRowKey(server1[1], 1)]: {
+    key: detailRowKey(server1[1], 1),
+    status: "live",
+    livePrice: 1150,
+    currency: "INR",
+    directUrl: "https://example.com/p/verified",
+    verifiedAt: "2026-11-24T16:00:00.000Z",
+  },
+};
+const rowsVerified = applyLivePrices(server1, verifiedLive, "INR");
+check(
+  "verified row preserves verifiedAt timestamp",
+  rowsVerified.find((r) => r.offer.store === "Amazon.in")?.verifiedAt === "2026-11-24T16:00:00.000Z",
+);
+
 console.log(failures === 0 ? "\nAll detail-pricing checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

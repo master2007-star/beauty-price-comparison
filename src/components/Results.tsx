@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { refreshPrices, resolveLinks } from "@/lib/client-api";
 import { applyLivePrices } from "@/lib/detail-pricing";
 import { formatPrice } from "@/lib/format";
-import { computeGroupSavings } from "@/lib/grouping";
+import { computeGroupSavings, extractSize, sizesMatch } from "@/lib/grouping";
 import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 import { isDirectProductUrl, sanitizeProductUrl } from "@/lib/url";
@@ -64,7 +64,19 @@ function ProductThumb({
  *  immersive token can resolve a Serper offer's link). The store + price
  *  gate still uses the clicked offer only — never a sibling's. */
 function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
-  const ordered = groupOffers ? [offer, ...groupOffers] : [offer];
+  const offerSize = extractSize(offer.title);
+  // Only pool sibling tokens that match the exact variant size and price band
+  const compatible = groupOffers
+    ? groupOffers.filter((o) => {
+        const oSize = extractSize(o.title);
+        if (offerSize && oSize && !sizesMatch(offerSize, oSize)) return false;
+        if (offer.price > 0 && o.price > 0) {
+          if (o.price > offer.price * 1.5 || o.price < offer.price / 1.5) return false;
+        }
+        return true;
+      })
+    : [offer];
+  const ordered = [offer, ...compatible];
   const uniq = (pick: (o: Offer) => string | null) =>
     [...new Set(ordered.map(pick).filter((v): v is string => Boolean(v)))];
   return {
@@ -261,7 +273,23 @@ function StoreRows({
             <span className="store-price">
               {livePrice !== null ? formatPrice(livePrice, "INR") : offer.priceLabel}
             </span>
-            {livePrice !== null ? <span className="flag-live">Live</span> : null}
+            {livePrice !== null ? (
+              <span
+                className="flag-live"
+                title={row.verifiedAt ? `Verified ${new Date(row.verifiedAt).toLocaleTimeString()}` : "Verified live"}
+              >
+                Live
+              </span>
+            ) : row.isUnverified ? (
+              <span className="flag-unverified" title="Retailer price could not be verified automatically">
+                Price needs verification
+              </span>
+            ) : null}
+            {row.verifiedAt ? (
+              <span className="verified-time small muted" style={{ fontSize: "0.72rem" }}>
+                Verified {new Date(row.verifiedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            ) : null}
             {row.deltaLabel ? <span className="delta">{row.deltaLabel}</span> : null}
             <StoreButton offer={offer} groupOffers={group.offers} warmedDirectUrl={live?.directUrl} />
             {showTitles && offer.title !== group.title ? (
