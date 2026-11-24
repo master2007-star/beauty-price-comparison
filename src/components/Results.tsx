@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { refreshPrices, resolveLinks } from "@/lib/client-api";
-import { applyLivePrices } from "@/lib/detail-pricing";
+import { applyLivePrices, detailRowKey, filterVisibleDetailRows } from "@/lib/detail-pricing";
 import { formatPrice } from "@/lib/format";
 import { computeGroupSavings, extractSize, sizesMatch } from "@/lib/grouping";
 import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
@@ -118,6 +118,7 @@ function StoreButton({
   offer,
   groupOffers,
   warmedDirectUrl,
+  onUnavailable,
 }: {
   offer: Offer;
   groupOffers?: Offer[];
@@ -127,6 +128,7 @@ function StoreButton({
    *  call. Absent while the refresh is pending, for rows beyond the
    *  refresh cap, or when the resolve produced nothing. */
   warmedDirectUrl?: string | null;
+  onUnavailable?: () => void;
 }) {
   const [state, setState] = useState<"idle" | "checking" | "nolink">("idle");
   // Only a validated direct merchant product URL counts: homepages, generic search
@@ -165,6 +167,7 @@ function StoreButton({
     }
     if (!canResolve) {
       setState("nolink");
+      onUnavailable?.();
       return;
     }
 
@@ -216,6 +219,7 @@ function StoreButton({
       }
     }
     setState("nolink");
+    onUnavailable?.();
   }
 
   // When a verified direct merchant product URL is confirmed, render an outbound link.
@@ -274,15 +278,23 @@ function StoreRows({
   showTitles?: boolean;
   livePrices?: Record<string, RefreshPricesResult>;
 }) {
+  const [clickedFailedKeys, setClickedFailedKeys] = useState<Set<string>>(new Set());
+
   const rows = useMemo(
     () => applyLivePrices(group.offers, livePrices, group.currency),
     [group, livePrices],
   );
+
+  const { visibleRows, hiddenCount } = useMemo(
+    () => filterVisibleDetailRows(rows, clickedFailedKeys),
+    [rows, clickedFailedKeys],
+  );
+
   return (
     <div className="store-rows">
-      {rows.map((row) => {
+      {visibleRows.map((row) => {
         const { offer, live } = row;
-        const key = `${offer.store}-${offer.price}-${row.index}`;
+        const key = detailRowKey(offer, row.index);
         const livePrice = row.isLive ? row.effectivePrice : null;
         return (
           <div className="store-row" key={key}>
@@ -310,13 +322,23 @@ function StoreRows({
               </span>
             ) : null}
             {row.deltaLabel ? <span className="delta">{row.deltaLabel}</span> : null}
-            <StoreButton offer={offer} groupOffers={group.offers} warmedDirectUrl={live?.directUrl} />
+            <StoreButton
+              offer={offer}
+              groupOffers={group.offers}
+              warmedDirectUrl={live?.directUrl}
+              onUnavailable={() => setClickedFailedKeys((prev) => new Set(prev).add(key))}
+            />
             {showTitles && offer.title !== group.title ? (
               <span className="store-listed-as">Listed as “{offer.title}”</span>
             ) : null}
           </div>
         );
       })}
+      {hiddenCount > 0 ? (
+        <div className="small muted store-rows-hidden-notice" style={{ marginTop: 12, textAlign: "center" }}>
+          {hiddenCount} {hiddenCount === 1 ? "store" : "stores"} hidden — no direct product page found
+        </div>
+      ) : null}
     </div>
   );
 }

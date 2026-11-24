@@ -32,7 +32,7 @@ import type { RefreshPricesItem, RefreshPricesResult } from "./types";
 
 const FETCH_TIMEOUT_MS = 6_000;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
-const MAX_ITEMS = 12;
+const MAX_ITEMS = 40;
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 

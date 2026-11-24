@@ -3,7 +3,13 @@
  * No network, no provider keys — pure unit-level checks.
  * Run: npm run check:detail-pricing
  */
-import { applyLivePrices, detailRowKey, liveInrPrice } from "../src/lib/detail-pricing";
+import {
+  applyLivePrices,
+  detailRowKey,
+  filterVisibleDetailRows,
+  isDetailRowHidden,
+  liveInrPrice,
+} from "../src/lib/detail-pricing";
 import type { Offer, RefreshPricesResult } from "../src/lib/types";
 
 let failures = 0;
@@ -181,6 +187,49 @@ const rowsVerified = applyLivePrices(server1, verifiedLive, "INR");
 check(
   "verified row preserves verifiedAt timestamp",
   rowsVerified.find((r) => r.offer.store === "Amazon.in")?.verifiedAt === "2026-11-24T16:00:00.000Z",
+);
+
+/* ------------------- R2: hide unresolvable rows ------------------- */
+const r2Offers = [
+  offer({ store: "Shopsy", price: 330, isCheapest: true, deltaLabel: null }),
+  offer({ store: "Nykaa", price: 735, deltaLabel: "+₹405 vs lowest" }),
+  offer({ store: "Amazon.in", price: 999, deltaLabel: "+₹669 vs lowest" }),
+];
+const r2Live: Record<string, RefreshPricesResult> = {
+  [detailRowKey(r2Offers[0], 0)]: {
+    key: detailRowKey(r2Offers[0], 0),
+    status: "unavailable",
+    livePrice: null,
+    currency: null,
+    directUrl: undefined,
+  },
+  [detailRowKey(r2Offers[1], 1)]: {
+    key: detailRowKey(r2Offers[1], 1),
+    status: "live",
+    livePrice: 735,
+    currency: "INR",
+    directUrl: "https://www.nykaa.com/p/1",
+  },
+  // Amazon.in not in live map (never attempted / beyond cap)
+};
+
+const r2Rows = applyLivePrices(r2Offers, r2Live, "INR");
+const { visibleRows: r2Visible, hiddenCount: r2HiddenCount } = filterVisibleDetailRows(r2Rows);
+
+check(
+  "R2 (a): row whose warmed resolve returned null and has no directUrl is excluded from rendered rows",
+  r2Visible.some((r) => r.offer.store === "Shopsy") === false && r2HiddenCount === 1,
+);
+
+check(
+  "R2 (b): row whose resolve was never attempted stays rendered",
+  r2Visible.some((r) => r.offer.store === "Amazon.in") === true,
+);
+
+check(
+  "R2 (c): deltas and lowest are computed over ALL offers including the hidden row",
+  r2Rows.some((r) => r.offer.store === "Shopsy" && r.isCheapest === true) &&
+  r2Visible.find((r) => r.offer.store === "Nykaa")?.deltaLabel === "+₹405 vs lowest",
 );
 
 console.log(failures === 0 ? "\nAll detail-pricing checks passed." : `\n${failures} check(s) failed.`);

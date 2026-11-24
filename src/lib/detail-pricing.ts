@@ -93,3 +93,39 @@ export function applyLivePrices(
     deltaLabel: i === 0 ? null : deltaLabel(row.effectivePrice, lowest, currency),
   }));
 }
+
+/**
+ * A store row is hidden ONLY once its link resolution has been attempted
+ * and has definitively failed — i.e. the detail refresh already ran for
+ * this row and returned no direct URL, or the user clicked "Go to Store"
+ * and resolution failed, AND it has no search-time direct URL.
+ * Never hide an un-attempted or pending row.
+ */
+export function isDetailRowHidden(
+  row: DetailRow,
+  clickedFailedKeys?: Set<string>,
+): boolean {
+  if (clickedFailedKeys && clickedFailedKeys.has(detailRowKey(row.offer, row.index))) {
+    return true;
+  }
+  // Search-time direct merchant URL is always kept
+  if (row.offer.directUrl) return false;
+  // Warmed direct URL from refresh is kept
+  if (row.live?.directUrl) return false;
+  // If resolution was never attempted for this row, it stays visible
+  if (!row.live) return false;
+  // Resolution was attempted and produced no direct URL
+  return true;
+}
+
+/**
+ * Filters rows for display in the detail view while keeping deltas and
+ * statistics calculated across all offers.
+ */
+export function filterVisibleDetailRows(
+  rows: DetailRow[],
+  clickedFailedKeys?: Set<string>,
+): { visibleRows: DetailRow[]; hiddenCount: number } {
+  const visibleRows = rows.filter((r) => !isDetailRowHidden(r, clickedFailedKeys));
+  return { visibleRows, hiddenCount: rows.length - visibleRows.length };
+}
