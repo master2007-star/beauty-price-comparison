@@ -1,4 +1,17 @@
+import crypto from "crypto";
 import { createClient, createPool } from "@vercel/postgres";
+
+export interface TrackedProductRecord {
+  id: number;
+  product_key: string;
+  title: string | null;
+  email: string;
+  target_price: number;
+  unsubscribe_token: string;
+  active: boolean;
+  created_at: Date | string;
+  last_alert_at: Date | string | null;
+}
 
 export interface PriceSnapshotRecord {
   price: number;
@@ -185,6 +198,22 @@ export async function ensureSchema(): Promise<void> {
             CREATE INDEX IF NOT EXISTS idx_snapshots_key_store_time
               ON price_snapshots (product_key, store, recorded_at)
           `;
+          await client.sql`
+            CREATE TABLE IF NOT EXISTS tracked_products (
+              id SERIAL PRIMARY KEY,
+              product_key TEXT NOT NULL,
+              title TEXT,
+              email TEXT NOT NULL,
+              target_price NUMERIC(10,2) NOT NULL,
+              unsubscribe_token TEXT NOT NULL UNIQUE,
+              active BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              last_alert_at TIMESTAMPTZ
+            )
+          `;
+          await client.sql`
+            CREATE INDEX IF NOT EXISTS idx_tracked_active ON tracked_products (active, created_at)
+          `;
         });
       } catch (err) {
         console.error("ensureSchema failed:", err);
@@ -307,5 +336,150 @@ export async function getPriceHistory(
   } catch (err) {
     console.error(`getPriceHistory error for key ${productKey}:`, err);
     return emptyResult;
+  }
+}
+
+/**
+ * Creates a new price alert subscription in tracked_products.
+ * Includes abuse guard: maximum 5 active tracks per email created in 24 hours.
+ */
+export async function createTrackedProduct(input: {
+  product_key: string;
+  title?: string;
+  email: string;
+  target_price: number;
+}): Promise<{ ok: boolean; error?: string; token?: string }> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "Database is not configured." };
+  }
+
+  try {
+    await ensureSchema();
+    const token = crypto.randomBytes(24).toString("hex");
+
+    return await withClient(async (client) => {
+      // Abuse check: max 5 active tracks per email in the last 24h
+      const countRes = await client.sql`
+        SELECT COUNT(*)::int as count
+        FROM tracked_products
+        WHERE LOWER(email) = LOWER(${input.email})
+          AND created_at >= NOW() - INTERVAL '24 hours'
+          AND active = TRUE
+      `;
+      const count = Number(countRes.rows[0]?.count ?? 0);
+      if (count >= 5) {
+        return {
+          ok: false,
+          error: "Track limit reached: maximum 5 active product alerts per email per day.",
+        };
+      }
+
+      await client.sql`
+        INSERT INTO tracked_products (
+          product_key,
+          title,
+          email,
+          target_price,
+          unsubscribe_token,
+          active
+        ) VALUES (
+          ${input.product_key},
+          ${input.title ?? null},
+          ${input.email.toLowerCase()},
+          ${input.target_price},
+          ${token},
+          TRUE
+        )
+      `;
+
+      return { ok: true, token };
+    });
+  } catch (err) {
+    console.error("createTrackedProduct error:", err);
+    return { ok: false, error: "Failed to save alert in database." };
+  }
+}
+
+/**
+ * Deactivates a price alert via unsubscribe token.
+ */
+export async function unsubscribeTrackedProduct(
+  token: string,
+): Promise<{ ok: boolean; title?: string | null; email?: string }> {
+  if (!isDatabaseConfigured() || !token) {
+    return { ok: false };
+  }
+
+  try {
+    await ensureSchema();
+    return await withClient(async (client) => {
+      const res = await client.sql`
+        UPDATE tracked_products
+        SET active = FALSE
+        WHERE unsubscribe_token = ${token}
+        RETURNING title, email
+      `;
+      if (res.rows.length === 0) {
+        return { ok: false };
+      }
+      const row = res.rows[0] as { title: string | null; email: string };
+      return { ok: true, title: row.title, email: row.email };
+    });
+  } catch (err) {
+    console.error("unsubscribeTrackedProduct error:", err);
+    return { ok: false };
+  }
+}
+
+/**
+ * Loads active tracks created within the last 30 days, capped at `limit` (default 20).
+ */
+export async function getActiveTracks(limit: number = 20): Promise<TrackedProductRecord[]> {
+  if (!isDatabaseConfigured()) return [];
+
+  try {
+    await ensureSchema();
+    return await withClient(async (client) => {
+      const res = await client.sql`
+        SELECT id, product_key, title, email, target_price, unsubscribe_token, active, created_at, last_alert_at
+        FROM tracked_products
+        WHERE active = TRUE
+          AND created_at >= NOW() - INTERVAL '30 days'
+        ORDER BY created_at ASC
+        LIMIT ${limit}
+      `;
+      return (res.rows as any[]).map((r) => ({
+        id: Number(r.id),
+        product_key: String(r.product_key),
+        title: r.title ? String(r.title) : null,
+        email: String(r.email),
+        target_price: Number(r.target_price),
+        unsubscribe_token: String(r.unsubscribe_token),
+        active: Boolean(r.active),
+        created_at: r.created_at,
+        last_alert_at: r.last_alert_at,
+      }));
+    });
+  } catch (err) {
+    console.error("getActiveTracks error:", err);
+    return [];
+  }
+}
+
+/**
+ * Sets last_alert_at = NOW() for a notified track.
+ */
+export async function recordTrackAlert(id: number): Promise<void> {
+  if (!isDatabaseConfigured()) return;
+  try {
+    await withClient(async (client) => {
+      await client.sql`
+        UPDATE tracked_products
+        SET last_alert_at = NOW()
+        WHERE id = ${id}
+      `;
+    });
+  } catch (err) {
+    console.error(`recordTrackAlert failed for id ${id}:`, err);
   }
 }

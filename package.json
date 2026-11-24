@@ -24,6 +24,7 @@
     "check:gemini": "tsx scripts/check-gemini.ts",
     "check:grouping": "tsx scripts/check-grouping.ts",
     "check:live-price": "tsx scripts/check-live-price.ts",
+    "check:price-alerts": "tsx scripts/check-price-alerts.ts",
     "check:price-history": "tsx scripts/check-price-history.ts",
     "dev": "next dev",
     "start": "next start"

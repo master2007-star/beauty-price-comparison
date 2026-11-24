@@ -469,6 +469,154 @@ function PriceHistorySection({ group }: { group: ProductGroup }) {
   );
 }
 
+function TrackPriceSection({ group }: { group: ProductGroup }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [targetPrice, setTargetPrice] = useState(String(group.lowestPrice));
+  const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOpen(false);
+    setSuccessMsg(null);
+    setErrorMsg(null);
+    setTargetPrice(String(group.lowestPrice));
+  }, [group]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErrorMsg(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_key: group.productKey,
+          title: group.title,
+          email,
+          target_price: parseFloat(targetPrice),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to set price alert.");
+      }
+      setSuccessMsg(data.message || `We'll email you when this drops to ₹${targetPrice} or below.`);
+      setOpen(false);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 14, marginBottom: 16 }}>
+      {successMsg ? (
+        <div
+          style={{
+            padding: "10px 14px",
+            background: "#ecfdf5",
+            border: "1px solid #10b981",
+            borderRadius: 8,
+            color: "#065f46",
+            fontSize: "0.9rem",
+            fontWeight: 500,
+          }}
+        >
+          ✓ {successMsg}
+        </div>
+      ) : !open ? (
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          onClick={() => setOpen(true)}
+        >
+          <span>🔔</span> Track price
+        </button>
+      ) : (
+        <form
+          onSubmit={handleSubmit}
+          style={{
+            background: "var(--cream-2, #f9fafb)",
+            border: "1px solid var(--line, #e5e7eb)",
+            borderRadius: 10,
+            padding: "14px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            maxWidth: 420,
+          }}
+        >
+          <div style={{ fontWeight: 600, fontSize: "0.92rem", color: "var(--ink, #111827)" }}>
+            Get an email when the price drops
+          </div>
+          {errorMsg ? (
+            <div style={{ color: "#b91c1c", fontSize: "0.85rem" }}>{errorMsg}</div>
+          ) : null}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Your email address"
+              required
+              style={{
+                flex: 1,
+                minWidth: 180,
+                padding: "8px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--line, #d1d5db)",
+                fontSize: "0.88rem",
+              }}
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: "0.88rem", color: "var(--ink-muted, #6b7280)" }}>₹</span>
+              <input
+                type="number"
+                value={targetPrice}
+                onChange={(e) => setTargetPrice(e.target.value)}
+                placeholder="Target price"
+                step="any"
+                min="1"
+                required
+                style={{
+                  width: 90,
+                  padding: "8px 8px",
+                  borderRadius: 6,
+                  border: "1px solid var(--line, #d1d5db)",
+                  fontSize: "0.88rem",
+                }}
+              />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="submit"
+              className="btn btn-sm btn-terra"
+              disabled={loading}
+              style={{ minWidth: 80 }}
+            >
+              {loading ? "Saving…" : "Set alert"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 /** Focused detail view for one product: name, image, variant summary, and
  *  every compared store price with a working store link per row. Opening
  *  the detail fires one live-price refresh for the group's rows; the
@@ -556,6 +704,7 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
           </div>
         </div>
         <PriceHistorySection group={group} />
+        <TrackPriceSection group={group} />
         <StoreRows group={group} showTitles livePrices={livePrices} />
       </div>
       <button type="button" className="btn btn-sm btn-ghost detail-back-bottom" onClick={onBack}>
