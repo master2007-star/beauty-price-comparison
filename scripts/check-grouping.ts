@@ -815,5 +815,20 @@ check(
   `savings=${smallGroupHonest?.savings} savingsPercent=${smallGroupHonest?.savingsPercent}`,
 );
 
+/* Bimodal 4-price cluster check (Cetaphil Redness fixture) */
+const bimodalOutlier = computeGroupSavings([
+  { price: 802.27, store: "Amazon" },
+  { price: 978, store: "FirstCry" },
+  { price: 17810.9, store: "GoSupps" },
+  { price: 25090, store: "Desertcart" },
+], "INR");
+check(
+  "saving outlier (bimodal 4-price): [802.27, 978, 17810.9, 25090] upper cluster excluded → savings 175.73, 18%",
+  bimodalOutlier !== null &&
+    bimodalOutlier.savings === 175.73 &&
+    bimodalOutlier.savingsPercent === 18,
+  `savings=${bimodalOutlier?.savings} savingsPercent=${bimodalOutlier?.savingsPercent}`,
+);
+
 console.log(failures === 0 ? "\nAll grouping checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

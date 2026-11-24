@@ -881,10 +881,37 @@ export function computeGroupSavings(
     // drags the median up with it. Use a direct ratio check instead:
     validPrices = max > 3 * min ? prices.filter((p) => p !== max) : prices;
   } else {
-    const mid = Math.floor(prices.length / 2);
-    const median = prices.length % 2 !== 0 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
-    const threshold = 3 * median;
-    validPrices = prices.filter((p) => p <= threshold);
+    // Gap / cluster check for bimodal groups (e.g. domestic cluster + import cluster):
+    // find the largest adjacent gap ratio (next / current).
+    let maxRatio = 1;
+    let splitIndex = -1;
+    for (let i = 0; i < prices.length - 1; i++) {
+      const ratio = prices[i + 1] / prices[i];
+      if (ratio > maxRatio) {
+        maxRatio = ratio;
+        splitIndex = i;
+      }
+    }
+
+    let candidates = prices;
+    if (maxRatio > 3 && splitIndex >= 1) {
+      // Splits into a lower cluster of at least 2 prices and an upper cluster.
+      // Exclude the whole upper cluster from the saving calculation.
+      candidates = prices.slice(0, splitIndex + 1);
+    }
+
+    if (candidates.length < 2) return null;
+
+    if (candidates.length < 3) {
+      const min = candidates[0];
+      const max = candidates[candidates.length - 1];
+      validPrices = max > 3 * min ? candidates.filter((p) => p !== max) : candidates;
+    } else {
+      const mid = Math.floor(candidates.length / 2);
+      const median = candidates.length % 2 !== 0 ? candidates[mid] : (candidates[mid - 1] + candidates[mid]) / 2;
+      const threshold = 3 * median;
+      validPrices = candidates.filter((p) => p <= threshold);
+    }
   }
 
   if (validPrices.length < 2) return null;
