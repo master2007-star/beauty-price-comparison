@@ -218,6 +218,30 @@ async function main() {
   const neither = await resolveDirectLink(req, cfg);
   check("no match on either provider returns null", neither.directUrl === null, `got ${neither.directUrl}`);
 
+  /* Case 10: live Ordinary listing with descriptor title matching Shopsy candidate with seller prefix */
+  currentSerpApiPayload = {
+    shopping_results: [
+      {
+        source: "Shopsy",
+        title: "Tlismi Ordinary Niacinamide 10% + Zinc 1% Serum 30ml Helps Minimize Pore Appearance",
+        link: SHOPSY_REDIRECT,
+        extracted_price: 330,
+      },
+    ],
+  };
+  const liveTitleReq = {
+    title: "THE ORDINARY Niacinamide Zinc Educes Skin Irritation Blemish Formula",
+    store: "Shopsy By Flipkart",
+    price: 330,
+    productUrl: GOOGLE_SHOPPING_PAGE,
+  };
+  const liveTitleHit = await resolveDirectLink(liveTitleReq, cfg);
+  check(
+    "Live listing title with descriptor fluff resolves to Shopsy PDP",
+    liveTitleHit.directUrl === SHOPSY_PDP,
+    `got ${liveTitleHit.directUrl}`
+  );
+
   console.log(failures === 0 ? "\nAll resolve-links checks passed." : `\n${failures} check(s) failed.`);
   process.exit(failures === 0 ? 0 : 1);
 }

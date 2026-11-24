@@ -568,7 +568,12 @@ function titleMatches(wanted: string, candidate: string): boolean {
   if (wSize && cSize && !sizesMatch(wSize, cSize)) return false;
   if (wSize && !cSize) return false;
 
-  const ignored = new Set(["the", "and", "for", "with", "from", "new", "best", "buy", "online"]);
+  const ignored = new Set([
+    "the", "and", "for", "with", "from", "new", "best", "buy", "online",
+    "skin", "blemish", "formula", "irritation", "helps", "reduces", "educes",
+    "minimize", "minimizes", "pore", "appearance", "care", "daily", "pure",
+    "solution", "treatment"
+  ]);
   const words = (value: string) => new Set(
     value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/)
       .filter((word) => word.length > 1 && !ignored.has(word)),
