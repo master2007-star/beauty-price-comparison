@@ -69,14 +69,14 @@ export function applyLivePrices(
   const rows: DetailRow[] = offers.map((offer, index) => {
     const live = livePrices[detailRowKey(offer, index)];
     const livePrice = liveInrPrice(live);
-    const isUnverified = Boolean(live && (live.status === "unverified" || (live.status === "unavailable" && live.directUrl)));
+    const isUnverified = Boolean(live && livePrice === null);
     return {
       offer,
       index,
       live,
       isLive: livePrice !== null,
       isUnverified,
-      verifiedAt: live?.verifiedAt ?? null,
+      verifiedAt: livePrice !== null ? live?.verifiedAt ?? null : null,
       effectivePrice: livePrice ?? offer.price,
       isCheapest: offer.isCheapest ?? false,
       deltaLabel: offer.deltaLabel ?? null,
@@ -118,27 +118,14 @@ export function computeEffectiveStats(
 }
 
 /**
- * A store row is hidden ONLY once its link resolution has been attempted
- * and has definitively failed — i.e. the detail refresh already ran for
- * this row and returned no direct URL, or the user clicked "Go to Store"
- * and resolution failed, AND it has no search-time direct URL.
- * Never hide an un-attempted or pending row.
+ * Background refreshes update price/badge/link state, never membership.
+ * Only an individual failed store-button click can hide that row.
  */
 export function isDetailRowHidden(
   row: DetailRow,
   clickedFailedKeys?: Set<string>,
 ): boolean {
-  if (clickedFailedKeys && clickedFailedKeys.has(detailRowKey(row.offer, row.index))) {
-    return true;
-  }
-  // Search-time direct merchant URL is always kept
-  if (row.offer.directUrl) return false;
-  // Warmed direct URL from refresh is kept
-  if (row.live?.directUrl) return false;
-  // If resolution was never attempted or is still in-flight (pending), it stays visible
-  if (!row.live) return false;
-  // Resolution was attempted and produced no direct URL
-  return true;
+  return Boolean(clickedFailedKeys?.has(detailRowKey(row.offer, row.index)));
 }
 
 /**
@@ -152,9 +139,14 @@ export function filterVisibleDetailRows(
   rows: DetailRow[],
   clickedFailedKeys?: Set<string>,
 ): { visibleRows: DetailRow[]; hiddenCount: number } {
-  const visible = rows.filter((r) => !isDetailRowHidden(r, clickedFailedKeys));
+  const unclicked = rows.filter((r) => !clickedFailedKeys?.has(detailRowKey(r.offer, r.index)));
+  const visible = unclicked.filter((r) => !isDetailRowHidden(r));
+  // Background failures can restore unclicked rows, never rows the user
+  // already tried. Keep the final failed row as an unavailable row so the
+  // card remains nonempty without resurrecting earlier failed clicks.
   if (visible.length === 0 && rows.length > 0) {
-    return { visibleRows: rows, hiddenCount: 0 };
+    const guarded = unclicked.length ? unclicked : rows.slice(-1);
+    return { visibleRows: guarded, hiddenCount: rows.length - guarded.length };
   }
   return { visibleRows: visible, hiddenCount: rows.length - visible.length };
 }

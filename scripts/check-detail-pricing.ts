@@ -221,8 +221,8 @@ const r2Rows = applyLivePrices(r2Offers, r2Live, "INR");
 const { visibleRows: r2Visible, hiddenCount: r2HiddenCount } = filterVisibleDetailRows(r2Rows);
 
 check(
-  "R2 (a): row whose warmed resolve returned null and has no directUrl is excluded from rendered rows",
-  r2Visible.some((r) => r.offer.store === "Shopsy") === false && r2HiddenCount === 1,
+  "R2 (a): background resolution failure keeps the snapshot row rendered",
+  r2Visible.some((r) => r.offer.store === "Shopsy") === true && r2HiddenCount === 0,
 );
 
 check(

@@ -68,7 +68,7 @@ export interface SizeInfo {
 }
 
 const SIZE_RE =
-  /(\d+(?:\.\d+)?)\s*(fl\.?\s*oz|fluid\s*ounces?|oz|ounces?|millilitres?|milliliters?|ml|l|litres?|liters?|kilograms?|kg|grams?|g|ct|count)\b/i;
+  /(\d+(?:\.\d+)?)\s*(fl\.?\s*oz|fluid\s*ounces?|oz|ounces?|millilitres?|milliliters?|ml|l|litres?|liters?|kilograms?|kg|grams?|gm|g|ct|count)\b/i;
 
 export function extractSize(title: string): SizeInfo | null {
   const m = SIZE_RE.exec(title);
@@ -94,7 +94,7 @@ export function extractSize(title: string): SizeInfo | null {
   if (unit === "kg" || unit === "kilogram" || unit === "kilograms") {
     return { kind: "weight", value: amount * 1000 };
   }
-  if (unit === "g" || unit === "gram" || unit === "grams") {
+  if (unit === "g" || unit === "gm" || unit === "gram" || unit === "grams") {
     return { kind: "weight", value: amount };
   }
   return { kind: "count", value: amount };
@@ -233,9 +233,13 @@ export function shadesMatch(a: string | null, b: string | null): boolean {
   const normA = a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const normB = b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   if (normA === normB) return true;
-  const wordsA = normA.split(/\s+/).filter((w) => w.length > 1);
-  const wordsB = normB.split(/\s+/).filter((w) => w.length > 1);
-  return wordsA.some((w) => wordsB.includes(w));
+  const codeA = /\b\d{2,4}[a-z]?\b/.exec(normA)?.[0];
+  const codeB = /\b\d{2,4}[a-z]?\b/.exec(normB)?.[0];
+  if (codeA && codeB && codeA !== codeB) return false;
+  const nameA = normA.replace(/\b\d{2,4}[a-z]?\b/g, "").trim();
+  const nameB = normB.replace(/\b\d{2,4}[a-z]?\b/g, "").trim();
+  if (nameA && nameB) return nameA === nameB;
+  return Boolean(codeA && codeB && codeA === codeB);
 }
 
 export function variantSignature(title: string, productUrl?: string | null): VariantSignature {
@@ -599,8 +603,10 @@ const ABBREV: Record<string, string> = { sa: "salicylic" };
 
 export function significantTokens(title: string): Set<string> {
   const brand = extractBrand(title);
+  const shade = extractShade(title);
+  const lineTitle = shade ? title.toLowerCase().replace(shade, " ").replace(/\bshade\s*(?:no\.?|-|:)?/gi, " ") : title;
   const out = new Set<string>();
-  for (const raw of title.toLowerCase().split(/[^\p{L}\p{M}\p{N}%]+/u)) {
+  for (const raw of lineTitle.toLowerCase().split(/[^\p{L}\p{M}\p{N}%]+/u)) {
     if (raw.length <= 1) continue;
     if (/^\d/.test(raw)) continue; // sizes/quantities: 50gm, 30ml, 2x, 10%
     if (/^spf\d*$/.test(raw)) continue; // spf50 written without a space
@@ -740,6 +746,7 @@ export function statedVariantConflict(a: VariantSignature, b: VariantSignature):
   if (a.size && b.size && !sizesMatch(a.size, b.size)) return true;
   if (a.spf !== null && b.spf !== null && a.spf !== b.spf) return true;
   if (a.multipack !== b.multipack) return true;
+  if (a.shade && b.shade && !shadesMatch(a.shade, b.shade)) return true;
   return false;
 }
 

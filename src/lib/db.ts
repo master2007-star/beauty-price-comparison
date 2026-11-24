@@ -103,11 +103,22 @@ export async function withClient<T>(fn: (client: { sql: any }) => Promise<T>): P
 export function shouldRecordSnapshot(
   lastPrice: number | null | undefined,
   currentPrice: number,
+  lastRecordedAt?: Date | string | null,
+  now = new Date(),
 ): boolean {
   if (lastPrice === null || lastPrice === undefined || !Number.isFinite(lastPrice)) {
     return true;
   }
-  return Math.abs(lastPrice - currentPrice) > 0.001;
+  if (Math.abs(lastPrice - currentPrice) > 0.001) return true;
+  // A stable price is still a real observation on a new date. Without
+  // this, unchanged products never build daily history and eventually
+  // lose every point from the 30-day window.
+  if (lastRecordedAt !== undefined) {
+    const previous = lastRecordedAt === null ? null : new Date(lastRecordedAt);
+    return !previous || !Number.isFinite(previous.getTime()) ||
+      previous.toISOString().slice(0, 10) !== now.toISOString().slice(0, 10);
+  }
+  return false;
 }
 
 /**
@@ -247,22 +258,22 @@ export async function recordSnapshots(offers: SnapshotOfferInput[]): Promise<voi
     }
 
     const uniqueKeys = [...new Set(Array.from(batchMap.values()).map((o) => o.productKey))];
-    const latestPrices = new Map<string, number>();
+    const latestPrices = new Map<string, { price: number; recordedAt: Date | string }>();
 
     await withClient(async (client) => {
       // Query latest price for each productKey
       for (const key of uniqueKeys) {
         try {
           const res = await client.sql`
-            SELECT DISTINCT ON (store) store, price
+            SELECT DISTINCT ON (LOWER(store)) store, price, recorded_at
             FROM price_snapshots
             WHERE product_key = ${key}
-            ORDER BY store, recorded_at DESC
+            ORDER BY LOWER(store), recorded_at DESC
           `;
-          const rows = res.rows as Array<{ store: string; price: string | number }>;
+          const rows = res.rows as Array<{ store: string; price: string | number; recorded_at: Date | string }>;
           for (const row of rows) {
             const pairKey = `${key}|${row.store.toLowerCase()}`;
-            latestPrices.set(pairKey, Number(row.price));
+            latestPrices.set(pairKey, { price: Number(row.price), recordedAt: row.recorded_at });
           }
         } catch (queryErr) {
           console.error(`Failed to fetch latest prices for productKey ${key}:`, queryErr);
@@ -272,8 +283,8 @@ export async function recordSnapshots(offers: SnapshotOfferInput[]): Promise<voi
       // Filter to only those whose price changed
       const toInsert: SnapshotOfferInput[] = [];
       for (const [pairKey, candidate] of batchMap.entries()) {
-        const lastPrice = latestPrices.get(pairKey);
-        if (shouldRecordSnapshot(lastPrice, candidate.price)) {
+        const last = latestPrices.get(pairKey);
+        if (shouldRecordSnapshot(last?.price, candidate.price, last?.recordedAt)) {
           toInsert.push(candidate);
         }
       }

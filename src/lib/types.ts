@@ -119,6 +119,8 @@ export interface CompareResponse {
 }
 
 export interface ResolveLinksRequest {
+  /** Required group identity and variant, including attributes omitted by this row. */
+  groupTitle?: string;
   productId?: string;
   catalogId?: string;
   /** Pooled ids from the enclosing group, clicked offer's ids first. */
@@ -150,6 +152,7 @@ export interface ResolveLinksResponse {
  *  resolve-links takes, plus the client's row key. The client never
  *  supplies a URL — the server resolves one from the identities. */
 export interface RefreshPricesItem {
+  groupTitle?: string;
   key: string;
   store: string;
   price: number;

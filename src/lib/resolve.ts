@@ -1,50 +1,20 @@
 /**
- * Direct store-link resolution.
+ * Merchant PDP resolution: immersive tokens, SearchApi tokens/id rescue,
+ * the offer redirect, then exact title + store searches (SerpApi Shopping,
+ * SerpApi web index, Searlo fallback). Google search pages are never fetched
+ * as redirects or returned as store links.
  *
- * Tries, in order:
- *  1. SerpApi google_immersive_product by page_token (more_stores=true)
- *     — stores come back in product_results.stores. Verified live
- *     2026-11-16: every store `link` is a RELATIVE Google redirect
- *     path (`/goto?url=...`), NOT a merchant URL, so links are
- *     absolutized against google.com and a name-matching seller's
- *     link is resolved to its merchant destination where possible
- *     (adurl param first, else one redirect follow). A redirect that
- *     cannot be resolved is NEVER returned as a direct link — it
- *     opened Google's bot-verification interstitial and landed on a
- *     different product (live Nov 2026); the caller then falls back
- *     honestly to the Google Shopping page.
- *     This replaced the retired google_product id route, which always
- *     answered "Google Product hasn't returned any results for this
- *     query" and burned a SerpApi credit on every call; no id-based
- *     SerpApi calls are made any more.
- *  2. SearchApi google_product_offers via product_token (up to 3 tokens) —
- *     offers carry merchant.name + link + extracted_price.
- *  3. SearchApi google_product_page RESCUE — ONLY when both token pools
- *     are empty and a pooled product/catalog id exists: mints a
- *     product_token from one id (product.product_token), then runs
- *     route 2 with it, unchanged. Never runs before the token routes.
- *  4. The clicked offer's own product URL, when it is a Google
- *     redirect — followed server-side to the merchant page where
- *     possible, after all token/id routes have failed. A Google
- *     Shopping product page is never followed (it is not a redirect).
- *
- * The client sends a group-wide pool of tokens (the clicked offer's own
- * first, then its group siblings'); identical values collapse to one
- * provider call each, and at most 3 tokens are tried per route. All
- * routes match on the store name ALONE against the CLICKED offer: the
- * token already establishes product identity, and Google's cached
- * seller-listed price legitimately differs from the search-result price
- * (snapshots, discounts). Anything else returns null and the UI falls
- * back honestly to the Google Shopping product page. The no-match
- * `reason` names the failure cause per route (no keys / provider
- * failures / no sellers / no name match) without ever exposing keys,
- * tokens or URLs. Provider failures include the provider's own error
- * message, sanitized (error/message field only, 160 chars max, runs of
- * 32+ alphanumerics redacted).
+ * Tokens locate candidate sellers; they do not establish a retailer variant.
+ * When size/shade is specified, every path validates the merchant page against
+ * the required group/row variant. An unavailable or ambiguous PDP returns null
+ * and the client displays "Link unavailable". Provider credentials never leave
+ * the server.
  */
 import type { AppConfig } from "./env";
-import { pricesEqual, storesMatch } from "./format";
-import { extractShade, extractSize, shadesMatch, sizesMatch } from "./grouping";
+import { storesMatch } from "./format";
+import { extractBrand, hasBundleMismatch } from "./grouping";
+import { fetchPageText } from "./merchant-page";
+import { extractPdpTitle, hasRequiredVariant, matchesRequiredVariant, requiredVariantTitle, statedVariantsConflict } from "./variant-validation";
 import type { ProviderId, ResolveLinksRequest, ResolveLinksResponse } from "./types";
 import { isDirectProductUrl, sanitizeProductUrl } from "./url";
 
@@ -179,17 +149,23 @@ function recordFailure(attempt: ProviderAttempt, detail: string) {
  * for the shared gate: near-misses are recorded on the attempt so a
  * future gated route's no-match reason can say why.
  */
-function evaluateSeller(
+async function evaluateSeller(
   name: string,
   link: string,
   price: number | null,
   store: string | undefined,
   wantedPrice: number | undefined,
   attempt: ProviderAttempt,
-): SellerCandidate | null {
+  wantedTitle?: string,
+): Promise<SellerCandidate | null> {
   attempt.sellersSeen += 1;
   if (store && !storesMatch(name, store)) return null;
-  if (wantedPrice !== undefined && wantedPrice > 0) {
+  if (store && !storesMatch(new URL(link).hostname.replace(/^www\./i, ""), cleanStoreForQuery(store))) return null;
+  const validated = await validatePdpVariant(link, wantedTitle, store);
+  if (!validated) return null;
+  // A verified exact variant may have a stale Google snapshot price.
+  // Use price bounds only when the variant itself cannot establish identity.
+  if (!hasRequiredVariant(wantedTitle) && wantedPrice !== undefined && wantedPrice > 0) {
     if (price === null) {
       attempt.nameMatchedNoPrice ??= name;
       return null;
@@ -199,7 +175,18 @@ function evaluateSeller(
       return null;
     }
   }
-  return { name, link: sanitizeProductUrl(link), price };
+  return { name, link: validated, price };
+}
+
+async function validatePdpVariant(link: string, wantedTitle?: string, store?: string): Promise<string | null> {
+  if (!isMerchantUrl(link)) return null;
+  if (!hasRequiredVariant(wantedTitle)) return sanitizeProductUrl(link);
+  const page = await fetchPageText(link);
+  if (!page) return null;
+  if (store && !storesMatch(new URL(page.finalUrl).hostname.replace(/^www\./i, ""), cleanStoreForQuery(store))) return null;
+  const title = extractPdpTitle(page.html, new URL(page.finalUrl).searchParams.get("item_id") ?? undefined);
+  if (!title || !titleMatches(wantedTitle!, title)) return null;
+  return sanitizeProductUrl(page.finalUrl);
 }
 
 const REDIRECT_TIMEOUT_MS = 4_000;
@@ -319,6 +306,7 @@ async function viaSerpApiImmersive(
   store: string | undefined,
   cfg: AppConfig,
   wantedPrice?: number,
+  wantedTitle?: string,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
   const key = cfg.keys.serpapi;
@@ -380,12 +368,12 @@ async function viaSerpApiImmersive(
         // the caller falls back honestly to the Google Shopping page.
         if (!finalUrl) continue;
         const p = asNumber(r.extracted_price) ?? asNumber(r.price);
-        const hit = evaluateSeller(name, finalUrl, p, store, wantedPrice, attempt);
+        const hit = await evaluateSeller(name, finalUrl, p, store, wantedPrice, attempt, wantedTitle);
         if (hit) return { hit, attempt };
         continue;
       }
       const p = asNumber(r.extracted_price) ?? asNumber(r.price);
-      const hit = evaluateSeller(name, link, p, store, wantedPrice, attempt);
+      const hit = await evaluateSeller(name, link, p, store, wantedPrice, attempt, wantedTitle);
       if (hit) return { hit, attempt };
     }
   }
@@ -403,6 +391,7 @@ async function viaSearchApi(
   store: string | undefined,
   cfg: AppConfig,
   wantedPrice?: number,
+  wantedTitle?: string,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
   const key = cfg.keys.searchapi;
@@ -432,7 +421,7 @@ async function viaSearchApi(
       if (!name || !link) { attempt.missingFields += 1; continue; }
       if (!isMerchantUrl(link)) { attempt.googleRedirectLinks += 1; continue; }
       const p = asNumber(r.extracted_price);
-      const hit = evaluateSeller(name, link, p, store, wantedPrice, attempt);
+      const hit = await evaluateSeller(name, link, p, store, wantedPrice, attempt, wantedTitle);
       if (hit) return { hit, attempt };
     }
   }
@@ -475,6 +464,7 @@ async function viaSearchApiProductPage(
   store: string | undefined,
   cfg: AppConfig,
   wantedPrice?: number,
+  wantedTitle?: string,
 ): Promise<{ hit: SellerCandidate | null; attempt: ProviderAttempt }> {
   const attempt = emptyAttempt();
   const key = cfg.keys.searchapi;
@@ -498,7 +488,7 @@ async function viaSearchApiProductPage(
   const token = asString(product?.product_token) ?? asString(outcome.json.product_token);
   if (!token) return { hit: null, attempt };
   attempt.tokensMinted += 1;
-  const offers = await viaSearchApi([token], store, cfg, wantedPrice);
+  const offers = await viaSearchApi([token], store, cfg, wantedPrice, wantedTitle);
   mergeAttempts(attempt, offers.attempt);
   return { hit: offers.hit, attempt };
 }
@@ -578,15 +568,12 @@ function noMatchReason(
  * broad category result cannot be mistaken for the clicked product.
  */
 export function titleMatches(wanted: string, candidate: string): boolean {
-  // Strict size validation: conflicting stated sizes never match (e.g. 118ml vs 1L, or 30ml vs 18ml)
-  const wSize = extractSize(wanted);
-  const cSize = extractSize(candidate);
-  if (wSize && cSize && !sizesMatch(wSize, cSize)) return false;
-
-  // Strict shade validation: conflicting stated shades never match (e.g. Fair Porcelain vs 128 Warm Nude)
-  const wShade = extractShade(wanted);
-  const cShade = extractShade(candidate);
-  if (wShade && cShade && !shadesMatch(wShade, cShade)) return false;
+  if (!matchesRequiredVariant(wanted, candidate)) return false;
+  const wantedBrand = extractBrand(wanted);
+  const candidateBrand = extractBrand(candidate);
+  if (wantedBrand && candidateBrand && wantedBrand !== candidateBrand &&
+      !candidate.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").includes(wantedBrand)) return false;
+  if (hasBundleMismatch(wanted, candidate)) return false;
 
   const ignored = new Set([
     "the", "and", "for", "with", "from", "new", "best", "buy", "online",
@@ -624,7 +611,7 @@ function cleanTitleForQuery(title: string): string {
     "solution", "treatment"
   ]);
   const tokens = title.split(/\s+/).filter((t) => !ignored.has(t.toLowerCase().replace(/[^a-z0-9]/g, "")));
-  return tokens.length >= 2 ? tokens.slice(0, 7).join(" ") : title;
+  return tokens.length >= 2 ? tokens.join(" ") : title;
 }
 
 const MAX_REDIRECT_RESOLUTIONS = 3;
@@ -686,7 +673,9 @@ async function matchExactOffer(
       asString(result.source) ??
       asString(result.seller) ??
       asString(result.store) ??
-      asString(result.merchant);
+      asString(asRecord(result.merchant)?.name) ??
+      asString(result.merchant) ??
+      (() => { try { return new URL(asString(result.link) ?? "").hostname; } catch { return null; } })();
     const candidateTitle = asString(result.title) ?? asString(result.name);
     const link = asString(result.link) ?? asString(result.url);
     const productLink = asString(result.product_link) ?? asString(result.url);
@@ -694,12 +683,15 @@ async function matchExactOffer(
     if (!storesMatch(name, store) || !titleMatches(title, candidateTitle)) continue;
     const dest = await resolveCandidateLink(link, productLink, budget);
     if (!dest) continue;
+    if (!storesMatch(new URL(dest).hostname.replace(/^www\./i, ""), cleanStoreForQuery(store))) continue;
+    const validated = await validatePdpVariant(dest, title, store);
+    if (!validated) continue;
     const candPrice =
       asNumber(result.extracted_price) ?? asNumber(result.priceValue) ?? asNumber(result.price);
-    if (wantedPrice && candPrice && wantedPrice > 0) {
+    if (!hasRequiredVariant(title) && wantedPrice && candPrice && wantedPrice > 0) {
       if (candPrice > wantedPrice * 2.0 || candPrice < wantedPrice / 2.0) continue;
     }
-    return { name, link: dest, price: candPrice };
+    return { name, link: validated, price: candPrice };
   }
   return null;
 }
@@ -737,7 +729,18 @@ async function viaSerpApiExactOfferSearch(
   });
   const outcome = await fetchJson(`https://serpapi.com/search.json?${params}`, {});
   if (!outcome.json || outcome.apiError) return null;
-  return matchExactOffer(asArray(outcome.json.shopping_results), title, store, wantedPrice, {
+  const hit = await matchExactOffer(asArray(outcome.json.shopping_results), title, store, wantedPrice, {
+    remaining: MAX_REDIRECT_RESOLUTIONS,
+  });
+  if (hit) return hit;
+  // Token-free Shopping entries now often carry only /search?ibp=oshop
+  // links. They cannot be followed to a PDP. Search the same exact offer
+  // in the web index instead, then apply the same merchant/title gates.
+  params.set("engine", "google");
+  params.set("q", `${cleanTitleForQuery(title)} ${cleanStoreForQuery(store)}`);
+  const web = await fetchJson(`https://serpapi.com/search.json?${params}`, {});
+  if (!web.json || web.apiError) return null;
+  return matchExactOffer(asArray(web.json.organic_results), title, store, wantedPrice, {
     remaining: MAX_REDIRECT_RESOLUTIONS,
   });
 }
@@ -828,22 +831,27 @@ export async function resolveDirectLink(
     ...(req.catalogIds ?? []),
     req.catalogId,
   ]);
+  if (req.groupTitle && req.title && statedVariantsConflict(req.groupTitle, req.title)) {
+    return { directUrl: null, matchedStore: null, source: null, reason: "The row's stated variant conflicts with the product group." };
+  }
+  const wantedTitle = req.groupTitle || req.title
+    ? requiredVariantTitle(req.groupTitle ?? req.title!, req.title ? [req.title] : []) : undefined;
 
   let serpAttempt = emptyAttempt();
   let searchAttempt = emptyAttempt();
   let pageAttempt = emptyAttempt();
   if (immersiveTokens.length > 0 && cfg.keys.serpapi) {
-    const r = await viaSerpApiImmersive(immersiveTokens, req.store, cfg, req.price);
+    const r = await viaSerpApiImmersive(immersiveTokens, req.store, cfg, req.price, wantedTitle);
     serpAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "serpapi" satisfies ProviderId };
   }
   if (tokens.length > 0 && cfg.keys.searchapi) {
-    const r = await viaSearchApi(tokens, req.store, cfg, req.price);
+    const r = await viaSearchApi(tokens, req.store, cfg, req.price, wantedTitle);
     searchAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
   }
   if (immersiveTokens.length === 0 && tokens.length === 0 && ids.length > 0 && cfg.keys.searchapi) {
-    const r = await viaSearchApiProductPage(ids, req.store, cfg, req.price);
+    const r = await viaSearchApiProductPage(ids, req.store, cfg, req.price, wantedTitle);
     pageAttempt = r.attempt;
     if (r.hit) return { directUrl: r.hit.link, matchedStore: r.hit.name, source: "searchapi" satisfies ProviderId };
   }
@@ -854,7 +862,9 @@ export async function resolveDirectLink(
   // UI says so instead of opening the redirect.
   if (req.productUrl) {
     const resolved = await resolveOfferRedirect(req.productUrl);
-    if (resolved) return { directUrl: resolved, matchedStore: req.store ?? null, source: null };
+    const matchingStore = resolved && (!req.store || storesMatch(new URL(resolved).hostname.replace(/^www\./i, ""), cleanStoreForQuery(req.store)));
+    const validated = matchingStore ? await validatePdpVariant(resolved!, wantedTitle, req.store) : null;
+    if (validated) return { directUrl: validated, matchedStore: req.store ?? null, source: null };
   }
   // Last resort: only identity-free offers with both a title and store
   // can enter this path. A direct merchant PDP must pass both gates.
@@ -862,10 +872,13 @@ export async function resolveDirectLink(
   // (e.g. its monthly quota is exhausted) — without the fallback,
   // every identity-free row stays unresolvable while SerpApi is down.
   if (req.title && req.store) {
-    const serpHit = await viaSerpApiExactOfferSearch(req.title, req.store, cfg, req.price);
+    const serpHit = await viaSerpApiExactOfferSearch(wantedTitle ?? req.title, req.store, cfg, req.price);
     if (serpHit) return { directUrl: serpHit.link, matchedStore: serpHit.name, source: "serpapi" satisfies ProviderId };
-    const searloHit = await viaSearloExactOfferSearch(req.title, req.store, cfg, req.price);
+    const searloHit = await viaSearloExactOfferSearch(wantedTitle ?? req.title, req.store, cfg, req.price);
     if (searloHit) return { directUrl: searloHit.link, matchedStore: searloHit.name, source: "searlo" satisfies ProviderId };
   }
-  return { directUrl: null, matchedStore: null, source: null, reason: noMatchReason(req, cfg, serpAttempt, searchAttempt, pageAttempt) };
+  const reason = req.title && req.store && immersiveTokens.length === 0 && tokens.length === 0 && ids.length === 0
+    ? "No matching exact merchant product page was found for the title and store."
+    : noMatchReason(req, cfg, serpAttempt, searchAttempt, pageAttempt);
+  return { directUrl: null, matchedStore: null, source: null, reason };
 }

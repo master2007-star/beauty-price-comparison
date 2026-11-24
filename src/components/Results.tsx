@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { refreshPrices, resolveLinks } from "@/lib/client-api";
-import { applyLivePrices, computeEffectiveStats, detailRowKey, filterVisibleDetailRows } from "@/lib/detail-pricing";
-import { formatPrice } from "@/lib/format";
-import { computeGroupSavings, extractShade, extractSize, normalizeTitleKey, shadesMatch, sizesMatch } from "@/lib/grouping";
+import { applyLivePrices, computeEffectiveStats, detailRowKey, filterVisibleDetailRows, type DetailRow } from "@/lib/detail-pricing";
+import { deltaLabel as formatDeltaLabel, formatPrice } from "@/lib/format";
+import { pooledIdentities } from "@/lib/resolution-request";
+import { hasRequiredVariant, requiredVariantTitle } from "@/lib/variant-validation";
+import { hasPriceHistoryPoints } from "@/lib/price-history";
+import { computeGroupSavings, normalizeTitleKey } from "@/lib/grouping";
 import type { Offer, ProductGroup, RefreshPricesResult, SearchResponse } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 import { isDirectProductUrl, sanitizeProductUrl } from "@/lib/url";
@@ -103,38 +106,6 @@ export function ProductThumb({
   );
 }
 
-/** Identity pool for link resolution: the clicked offer's own ids/tokens
- *  first, then every sibling offer's ids/tokens from the same group (the
- *  group is one Google product, so a sibling SearchApi token or SerpApi
- *  immersive token can resolve a Serper offer's link). The store + price
- *  gate still uses the clicked offer only — never a sibling's. */
-function pooledIdentities(offer: Offer, groupOffers: Offer[] | undefined) {
-  const offerSize = extractSize(offer.title);
-  const offerShade = extractShade(offer.title);
-  // Only pool sibling tokens that match the exact variant size, shade, and price band
-  const compatible = groupOffers
-    ? groupOffers.filter((o) => {
-        const oSize = extractSize(o.title);
-        if (offerSize && oSize && !sizesMatch(offerSize, oSize)) return false;
-        const oShade = extractShade(o.title);
-        if (offerShade && oShade && !shadesMatch(offerShade, oShade)) return false;
-        if (offer.price > 0 && o.price > 0) {
-          if (o.price > offer.price * 2.0 || o.price < offer.price / 2.0) return false;
-        }
-        return true;
-      })
-    : [offer];
-  const ordered = [offer, ...compatible];
-  const uniq = (pick: (o: Offer) => string | null) =>
-    [...new Set(ordered.map(pick).filter((v): v is string => Boolean(v)))];
-  return {
-    productIds: uniq((o) => o.productId),
-    catalogIds: uniq((o) => o.catalogId),
-    productTokens: uniq((o) => o.productToken),
-    immersiveTokens: uniq((o) => o.immersiveToken),
-  };
-}
-
 /** An absolute http(s) URL with a real host — the only kind of URL
  *  ever opened from a store button. Empty strings, relative paths
  *  and non-http(s) schemes never reach window.open: opening an
@@ -165,11 +136,13 @@ function isGoogleUrl(value: string): boolean {
 function StoreButton({
   offer,
   groupOffers,
+  groupTitle,
   warmedDirectUrl,
   onUnavailable,
 }: {
   offer: Offer;
   groupOffers?: Offer[];
+  groupTitle?: string;
   /** Direct link warmed by the detail view's refresh (the server
    *  already resolved this row's store page). When present, the click
    *  opens it synchronously — no await, no blank tab, no resolve
@@ -179,16 +152,17 @@ function StoreButton({
   onUnavailable?: () => void;
 }) {
   const [state, setState] = useState<"idle" | "checking" | "nolink">("idle");
+  const requiredTitle = requiredVariantTitle(groupTitle ?? offer.title, [offer.title, ...(groupOffers ?? []).map((o) => o.title)]);
   // Only a validated direct merchant product URL counts: homepages, generic search
   // pages, and Google redirect URLs are rejected.
   const [direct, setDirect] = useState<string | null>(() => {
-    if (offer.directUrl && isOpenableUrl(offer.directUrl) && isDirectProductUrl(offer.directUrl)) {
+    if (!hasRequiredVariant(requiredTitle) && offer.directUrl && isOpenableUrl(offer.directUrl) && isDirectProductUrl(offer.directUrl)) {
       return sanitizeProductUrl(offer.directUrl);
     }
     return null;
   });
 
-  const pool = pooledIdentities(offer, groupOffers);
+  const pool = pooledIdentities(offer, groupOffers, groupTitle);
   const hasIdentity =
     pool.productIds.length > 0 ||
     pool.catalogIds.length > 0 ||
@@ -237,8 +211,9 @@ function StoreButton({
         productToken: offer.productToken ?? undefined,
         productTokens: pool.productTokens,
         immersiveTokens: pool.immersiveTokens,
-        productUrl: offer.productUrl ?? undefined,
+        productUrl: offer.productUrl ?? offer.directUrl ?? undefined,
         title: offer.title,
+        groupTitle: requiredTitle,
         store: offer.store,
         price: offer.price,
       });
@@ -317,38 +292,32 @@ function StoreButton({
  *  (live-or-server) price and the cheapest flag + deltas recompute
  *  against the live lowest (see src/lib/detail-pricing.ts); until then
  *  the server order and server deltas stand. */
-function StoreRows({
+export function StoreRows({
   group,
   showTitles = false,
-  livePrices = {},
+  visibleRows,
+  hiddenCount,
+  onUnavailable,
 }: {
   group: ProductGroup;
   showTitles?: boolean;
-  livePrices?: Record<string, RefreshPricesResult>;
+  visibleRows: DetailRow[];
+  hiddenCount: number;
+  onUnavailable: (key: string) => void;
 }) {
-  const [clickedFailedKeys, setClickedFailedKeys] = useState<Set<string>>(new Set());
-
-  const rows = useMemo(
-    () => applyLivePrices(group.offers, livePrices, group.currency),
-    [group, livePrices],
-  );
-
-  const { visibleRows, hiddenCount } = useMemo(
-    () => filterVisibleDetailRows(rows, clickedFailedKeys),
-    [rows, clickedFailedKeys],
-  );
-
+  const lowest = Math.min(...visibleRows.map((row) => row.effectivePrice));
   return (
     <div className="store-rows">
       {visibleRows.map((row) => {
         const { offer, live } = row;
         const key = detailRowKey(offer, row.index);
         const livePrice = row.isLive ? row.effectivePrice : null;
+        const delta = formatDeltaLabel(row.effectivePrice, lowest, group.currency);
         return (
           <div className="store-row" key={key}>
             <span className="store-name">{offer.store}</span>
             <span className="store-via">via {PROVIDER_LABELS[offer.provider]}</span>
-            {row.isCheapest ? <span className="flag-cheapest">Lowest</span> : null}
+            {row.effectivePrice === lowest ? <span className="flag-cheapest">Lowest</span> : null}
             <span className="store-price">
               {livePrice !== null ? formatPrice(livePrice, "INR") : offer.priceLabel}
             </span>
@@ -369,12 +338,13 @@ function StoreRows({
                 Verified {new Date(row.verifiedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             ) : null}
-            {row.deltaLabel ? <span className="delta">{row.deltaLabel}</span> : null}
+            {delta ? <span className="delta">{delta}</span> : null}
             <StoreButton
               offer={offer}
               groupOffers={group.offers}
+              groupTitle={group.title}
               warmedDirectUrl={live?.directUrl}
-              onUnavailable={() => setClickedFailedKeys((prev) => new Set(prev).add(key))}
+              onUnavailable={() => onUnavailable(key)}
             />
             {showTitles && offer.title !== group.title ? (
               <span className="store-listed-as">Listed as “{offer.title}”</span>
@@ -468,27 +438,37 @@ function PriceHistorySection({ group }: { group: ProductGroup }) {
   useEffect(() => {
     if (!group.productKey) return;
     const controller = new AbortController();
-    fetch(`/api/price-history?key=${encodeURIComponent(group.productKey)}&days=30`, {
-      signal: controller.signal,
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    setLoaded(false);
+    setData(null);
+    const load = (attempt = 0) => fetch(`/api/price-history?key=${encodeURIComponent(group.productKey)}&days=30`, {
+      signal: controller.signal, cache: "no-store",
     })
       .then((res) => {
         if (!res.ok) throw new Error("Price history fetch failed");
         return res.json();
       })
       .then((resData: PriceHistoryData) => {
+        if (controller.signal.aborted) return;
         setData(resData);
         setLoaded(true);
+        // Search writes snapshots after responding. Re-read an initially
+        // empty history briefly so that first real point can appear.
+        if (!hasPriceHistoryPoints(resData) && attempt < 2) {
+          retry = setTimeout(() => { void load(attempt + 1); }, 1500);
+        }
       })
       .catch(() => {
         // Loading and API-error states must hide the block silently.
-        setLoaded(false);
+        if (!controller.signal.aborted) setLoaded(false);
       });
-    return () => controller.abort();
+    void load();
+    return () => { controller.abort(); if (retry) clearTimeout(retry); };
   }, [group.productKey]);
 
   if (!loaded || !data) return null;
 
-  if (data.points < 2) {
+  if (!hasPriceHistoryPoints(data)) {
     return (
       <div
         className="price-history-card"
@@ -590,7 +570,10 @@ function PriceHistorySection({ group }: { group: ProductGroup }) {
       </div>
       <div style={{ fontSize: "0.88rem", fontWeight: 500, color: "var(--ink, #111827)" }}>
         Lowest in 30 days {formatPrice(data.lowest!, group.currency)} · Highest{" "}
-        {formatPrice(data.highest!, group.currency)} · Now {formatPrice(data.current!, group.currency)}
+        {formatPrice(data.highest!, group.currency)} · Latest daily low {formatPrice(data.current!, group.currency)}
+      </div>
+      <div className="small muted" style={{ marginTop: 6 }}>
+        {data.series[0].date}{data.series.length > 1 ? ` — ${data.series[data.series.length - 1].date}` : " · 1 recorded day"}
       </div>
     </div>
   );
@@ -753,21 +736,27 @@ function TrackPriceSection({ group }: { group: ProductGroup }) {
  *  synchronously on click instead of resolving again. */
 function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => void }) {
   const [livePrices, setLivePrices] = useState<Record<string, RefreshPricesResult>>({});
+  const [clickedFailedKeys, setClickedFailedKeys] = useState<Set<string>>(new Set());
 
   const rows = useMemo(
     () => applyLivePrices(group.offers, livePrices, group.currency),
     [group, livePrices],
   );
 
+  const { visibleRows, hiddenCount } = useMemo(
+    () => filterVisibleDetailRows(rows, clickedFailedKeys), [rows, clickedFailedKeys],
+  );
   const effectiveStats = useMemo(
-    () => computeEffectiveStats(rows, group.currency, group),
-    [rows, group],
+    () => computeEffectiveStats(visibleRows, group.currency, group),
+    [visibleRows, group],
   );
 
   useEffect(() => {
     const controller = new AbortController();
+    setLivePrices({});
+    setClickedFailedKeys(new Set());
     const items = group.offers.map((offer, i) => {
-      const pool = pooledIdentities(offer, group.offers);
+      const pool = pooledIdentities(offer, group.offers, group.title);
       return {
         key: `${offer.store}-${offer.price}-${i}`,
         store: offer.store,
@@ -779,12 +768,14 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
         productToken: offer.productToken ?? undefined,
         productTokens: pool.productTokens,
         immersiveTokens: pool.immersiveTokens,
-        productUrl: offer.productUrl ?? undefined,
+        productUrl: offer.productUrl ?? offer.directUrl ?? undefined,
         title: offer.title,
+        groupTitle: requiredVariantTitle(group.title, [offer.title, ...group.offers.map((o) => o.title)]),
       };
     });
     refreshPrices({ items }, controller.signal)
       .then((res) => {
+        if (controller.signal.aborted) return;
         const map: Record<string, RefreshPricesResult> = {};
         for (const r of res.results) map[r.key] = r;
         setLivePrices(map);
@@ -838,12 +829,13 @@ function ProductDetail({ group, onBack }: { group: ProductGroup; onBack: () => v
                 </div>
               ) : null}
             </div>
-            <div className="small muted">Prices are from Google Shopping — the store&rsquo;s live price may differ.</div>
+            <div className="small muted">Verified store prices are shown when available; other prices are Google Shopping snapshots.</div>
           </div>
         </div>
         <PriceHistorySection group={group} />
         <TrackPriceSection group={group} />
-        <StoreRows group={group} showTitles livePrices={livePrices} />
+        <StoreRows group={group} showTitles visibleRows={visibleRows} hiddenCount={hiddenCount}
+          onUnavailable={(key) => setClickedFailedKeys((prev) => new Set(prev).add(key))} />
       </div>
       <button type="button" className="btn btn-sm btn-ghost detail-back-bottom" onClick={onBack}>
         ← Back to results
@@ -1017,7 +1009,7 @@ export default function Results({ results, sort, view, onSortChange, onViewChang
                         </div>
                       </div>
                       <span className="store-price">{offer.priceLabel}</span>
-                      <StoreButton offer={offer} groupOffers={group?.offers} />
+                      <StoreButton offer={offer} groupOffers={group?.offers} groupTitle={group?.title} />
                     </motion.div>
                     );
                   })}

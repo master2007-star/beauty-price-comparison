@@ -35,6 +35,7 @@ function validItem(v: unknown): RefreshPricesItem | null {
     immersiveTokens: asStringArray(o.immersiveTokens),
     productUrl: str(o.productUrl),
     title: str(o.title),
+    groupTitle: str(o.groupTitle),
   };
 }
 

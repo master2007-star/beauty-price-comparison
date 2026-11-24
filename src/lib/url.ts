@@ -36,6 +36,7 @@ const GENERIC_SEARCH_PATHS = [
   /^\/shop\/search(?:\/|$)/i,
   /^\/browse(?:\/|$)/i,
   /^\/collections\/all(?:\/|$)/i,
+  /^\/(?:[a-z]{2}\/)?(?:sc|category|categories|collections|blogs?|articles?|pages)(?:\/|$)/i,
 ];
 
 const SEARCH_QUERY_KEYS = ["q", "query", "keyword", "k", "search", "term", "field-keywords"];
@@ -68,6 +69,10 @@ export function isDirectProductUrl(rawUrl: string | null | undefined): boolean {
 
   // Root or empty path: store homepage
   if (!pathname || pathname === "") return false;
+  // Digihaat's selected ONDC item lives in the query, not the path.
+  // A bare /en/product page cannot identify any exact product/variant.
+  if ((hostname === "digihaat.in" || hostname.endsWith(".digihaat.in")) &&
+      /\/(?:en\/)?product$/i.test(pathname) && !parsed.searchParams.get("item_id")) return false;
 
   // Language/region root alone (e.g. /en, /in, /en-in, /hi) is still a homepage
   if (/^\/[a-z]{2}(?:-[a-z]{2})?$/i.test(pathname)) return false;

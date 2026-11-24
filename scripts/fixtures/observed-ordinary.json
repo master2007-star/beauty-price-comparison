@@ -1,0 +1,57 @@
+{
+  "capturedAt": "2026-11-24T14:24:03.1117476Z",
+  "source": "https://beauty-price-comparison.vercel.app/api/search and /api/resolve-links",
+  "amazon": {
+    "productUrl": "https://www.google.com/search?ibp=oshop&q=The Ordinary Niacinamide 10% + Zinc 1%&prds=catalogid:11612029621943036438,productid:3475184969177853079,headlineOfferDocid:11046913450606671537,imageDocid:8831384815026287937,rds:PC_892758143087622264|PROD_PC_892758143087622264,gpcid:892758143087622264,mid:576462917198419946,pvt:hg&hl=en&gl=in&udm=28",
+    "directUrl": "https://www.amazon.in/Ordinary-Niacinamide-10-Zinc-30ml/dp/B01MDTVZTZ?source=ps-sl-shoppingads-lpcontext&ref_=fplfs&psc=1&smid=A15APWRK6P7LBV",
+    "price": 600,
+    "store": "Amazon.in",
+    "title": "The Ordinary Niacinamide 10% + Zinc 1%"
+  },
+  "shopsy": {
+    "title": "The Ordinary Niacinamide 10% + Zinc 1%",
+    "price": 330,
+    "store": "Shopsy By Flipkart",
+    "productUrl": "https://www.google.com/search?ibp=oshop&q=The+Ordinary+Niacinamide+10%25+%2B+Zinc+1%25&prds=localAnnotatedOfferId:1,catalogid:9649956160719746191,gpcid:82109394237814231,pvo:2,pvt:hg&gl=in&udm=28&pvorigin=2"
+  },
+  "offers": [
+    {
+      "price": 330,
+      "priceLabel": "₹330",
+      "currency": "INR",
+      "store": "Shopsy By Flipkart",
+      "title": "The Ordinary Niacinamide 10% + Zinc 1%",
+      "provider": "serper",
+      "productUrl": "https://www.google.com/search?ibp=oshop&q=The+Ordinary+Niacinamide+10%25+%2B+Zinc+1%25&prds=localAnnotatedOfferId:1,catalogid:9649956160719746191,gpcid:82109394237814231,pvo:2,pvt:hg&gl=in&udm=28&pvorigin=2",
+      "directUrl": null,
+      "rating": 4.4,
+      "reviews": 3500,
+      "imageUrl": "https://encrypted-tbn0.gstatic.com/shopping?q=tbn:ANd9GcRXSeoLf6Q4eksf83AC-VG4rwDbGSRwLlyh1i16Ccv-YEdoDD1QjCaUpnmglmnHaxnCRPdv0zTuH9PZek6TyHuT7I4EXfokqJ0cYOjkPZHnwCv9wfSq7Vq6",
+      "catalogId": null,
+      "productId": "9649956160719746191",
+      "productToken": null,
+      "immersiveToken": null,
+      "isCheapest": true,
+      "deltaLabel": null
+    },
+    {
+      "price": 600,
+      "priceLabel": "₹600",
+      "currency": "INR",
+      "store": "Amazon.in",
+      "title": "The Ordinary Niacinamide 10% + Zinc 1%",
+      "provider": "serpapi",
+      "productUrl": "https://www.google.com/search?ibp=oshop&q=The Ordinary Niacinamide 10% + Zinc 1%&prds=catalogid:11612029621943036438,productid:3475184969177853079,headlineOfferDocid:11046913450606671537,imageDocid:8831384815026287937,rds:PC_892758143087622264|PROD_PC_892758143087622264,gpcid:892758143087622264,mid:576462917198419946,pvt:hg&hl=en&gl=in&udm=28",
+      "directUrl": null,
+      "rating": 4.6,
+      "reviews": 1.1,
+      "imageUrl": "https://encrypted-tbn1.gstatic.com/shopping?q=tbn:ANd9GcROzCAjaCJx8wJU_9qArfCAnNgaT9NAHvY7AP3EpHOuBzzy-dzVV_PaUjhHtzz5gSonVx8Rr8i53V7SWiC2jc4WF5TtHBNUgcdxFxoa77bidC-CMxcUMteTAA",
+      "catalogId": "11612029621943036438",
+      "productId": "11612029621943036438",
+      "productToken": null,
+      "immersiveToken": "_X9xvHicbVRJjuvIETXsC_gItelVWY3M5FyFWpAiKZHiIA7JaUNQnAeR1EBRIrz3Pep3N9Be_jbgra_xe-GzWN3wzs5NZCIiXkbEi4h__-HPn3n9z5Kc5YTc1_plfaeMYU_FTLCyyJ_H85BN6bXOfiFIhoIsydEcZBiWIgDD_Zwm16Qbyjr7B4Q0RABxNIIcSQCCJgn2a5UnWVf3uVkU-Vkc0t_tAPlEIEgK0ICmGUgRzN_rY1Lmv-t_YVkCEizJQgogGrEMRzBfztnlG9ivY5ZDDMXCJzzL0Aghmvzr3jbF-P-qfjxN-fnx7S9ulb-a56zuk_Pj1aiT9Hk71ln-CsF3iHr9DgmvUd2nr_D5-rEcnzF8_V-wL0-PrxRDkzR6Zg85loQcR9Jfxtv1syp_mKYu_9dn2X3W_WfVfeb9T0My3or01z_-TZoUcX1SRAvbUthlXXgcaR1Kc-Z3fhrIgb0ZowOR1anMUwmWKM33qtTz5IjoEocY7rp0NfReXfTe2FoPeEnAfE9bLsCuoFk-NbudjrJWWnI5e7hiZh9giBzUVW6vYncxBAd7U7h09UHOEtuvKEMKUdjYpnu8074EHnknWIkfgQjPpO5TQ7SJaE9-xuUaodEbsoXvrUXIiillUdKOSi62sy1l9wh5th4Ys7NVFm9b0Zkk67Zomxgbx6SXK8enxgyoVwda4IBHIpJlhDfWI3E9N4DRI2ksYLfXQidGyz6qcga9oy2XEPfyxfUMaHTVnEh27TaCl_rhcthaS9IJR2eJOoy8Y-pGMm6yre9Fki1noyNXKMFXlBIq8Igscgl5srdeZ-LLovnlksoq9j2JsnH7xCkJzUsfbt81Nqp0A0DFQpWUBLLtAU5KkVwHMPP9oHOdRfUTf3j426hNpXufQtWwFgVF_YgTWJ0CQiD1rXfxa-iGQN0l0n30ZcMLu8ixgWFhMSWcIBI0TMEEd77VqW3UdYNDqH12HB9YGmd96ags6DRPmskAyQa2lSBabMI-SgBvOiMFBmlg6oZFrzBgecWulSitrDxrIxsgJELMDXljFOl2tB1Uqa6rUx4IgX2kNBvPcwKkH-6Xc_EN8Ns9MxWU20yDw9_ZrjrrVrtheTj5ouqxRm-9QYajKPRbrwMG_ZQOQ1vnv_7p6hiK-MEbwr0iyp1nAHHCO8HZQXZHEdStoZUJ5IPgiP3-fJ_rQRDDItAAHHdjf9g99lTIzGxV3tJ41jZ8IBFjEGtZpKbufJ2nYjhySRxdtQa_vzjm2vlY88r7Sxw7eTqd85Xj2vsPXjAqnq6zE71B_UM8mAcde8YjPU2M0-n9obE3q3DS9qFw1ePGqNBCWgLJkBJOuzvYhNlj7Zd2vdtc3CI4nKYoqjTbkiO6YmY-O1aAx-Tzd4m319vY4XXJUVzpY11ayjlRhPcXXlp_8EnCSeppC5LVtWQqht4x5Qk86RiBjAP0GHfBJR35y06UOJCoxKq1V2PIs8P8_rIxzY0mxbyAHSmWAknfu4ppfDzLekA0W-R0TnBskdAgf3P1j__SQHPE2_rj_KbsPzj2e4jg98_V-ZTE6s35aB477FMGXF2GAE5Ks4YGxYnp-8tvXK1P5XrNSw4qJUHn-LJ7rJjhWhVF02ZOKccGJk7RrhfG05yH4hWs6lvsORSd5bfzMcZVeM7ZxeTGy2TVdGwVbHJDSTebq61oZ6aGTFSGeO80AZkoJ5wT_nQ1zdhWynEZJdEuvaNz1MQZ4XXlNPdVu9qCNMwqzctLjoGtRrOVMIarXeTRi2ce3As7biEVF7uyte3lkT8nZVmxsNwfZU6FTUxu-75Rut64rk6O6F4qisrhTTFvlaRdIFJ8p_Gv10S_k9BYPKxpA9BBKeH4ThbPPdOi83quT7lxUfYrp_SddFinbhtOFr2cI6cU9BYLqTSuF3Zw2TnEmNOmpIsV2TRWd6MqGXUsRNq6bbpoJyF_pRTxGR_1Zi1DuYumbnFI6GxVglY228ONMVUO3eOofRTMzl0s6_1F9D6G-_Z0vs0zCcGoiN2JS9JjcaHWF7ZJFPV0q9jUfeDKOcwK_zz_AfsqfTA",
+      "isCheapest": false,
+      "deltaLabel": "+₹120 vs lowest"
+    }
+  ]
+}
