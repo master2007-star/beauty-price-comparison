@@ -27,6 +27,7 @@
     "check:live-price": "tsx scripts/check-live-price.ts",
     "check:price-alerts": "tsx scripts/check-price-alerts.ts",
     "check:price-history": "tsx scripts/check-price-history.ts",
+    "check:resolve-links": "tsx scripts/check-resolve-links.ts",
     "dev": "next dev",
     "start": "next start"
   },

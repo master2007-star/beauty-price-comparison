@@ -223,22 +223,44 @@ function absolutizeLink(link: string): string | null {
 }
 
 /**
+ * Destination carried in a Google redirect's query params — free, no
+ * network. SerpApi google_shopping links commonly arrive as
+ * /url?q=<merchant PDP> (or /aclk with adurl); extracting the param
+ * avoids a fetch that Google's bot interstitial would block anyway.
+ * Decodes twice: Google double-encodes the destination.
+ */
+function destinationFromRedirectParams(u: URL): string | null {
+  for (const key of ["adurl", "q", "url"]) {
+    const raw = u.searchParams.get(key);
+    if (!raw) continue;
+    let dest = raw;
+    for (let i = 0; i < 2; i++) {
+      try {
+        const decoded = decodeURIComponent(dest);
+        if (decoded === dest) break;
+        dest = decoded;
+      } catch {
+        break;
+      }
+    }
+    if (isMerchantUrl(dest)) return sanitizeProductUrl(dest);
+  }
+  return null;
+}
+
+/**
  * The merchant destination of a Google redirect link (e.g. an aclk
- * URL), or null. Tries the `adurl` query param first (free, no
- * network — it usually carries the destination, sometimes
- * double-encoded), then follows the redirect chain once and takes the
- * final URL. Either way the result must be an absolute http(s)
- * merchant URL, or it is rejected. Never returns a Google URL.
+ * URL), or null. Tries the destination query params first (`adurl`,
+ * `q`, `url` — free, no network; they usually carry the destination,
+ * sometimes double-encoded), then follows the redirect chain once
+ * and takes the final URL. Either way the result must be an absolute
+ * http(s) merchant URL, or it is rejected. Never returns a Google URL.
  */
 async function resolveRedirectLink(link: string): Promise<string | null> {
   try {
     const u = new URL(link);
-    const adurl = u.searchParams.get("adurl");
-    if (adurl) {
-      let dest = adurl;
-      try { dest = decodeURIComponent(dest); } catch { /* keep single-decoded */ }
-      if (isMerchantUrl(dest)) return sanitizeProductUrl(dest);
-    }
+    const dest = destinationFromRedirectParams(u);
+    if (dest) return dest;
   } catch {
     return null;
   }
@@ -560,12 +582,65 @@ function titleMatches(wanted: string, candidate: string): boolean {
 }
 
 /**
+ * Store name for the SerpApi query: drop a trailing "by <parent>"
+ * clause ("Shopsy By Flipkart" -> "Shopsy") so the search targets
+ * the storefront Google Shopping lists, not the parent company.
+ */
+function cleanStoreForQuery(store: string): string {
+  const cleaned = store.replace(/\s+by\s+.*$/i, "").trim();
+  return cleaned || store;
+}
+
+const MAX_REDIRECT_RESOLUTIONS = 3;
+
+/**
+ * The merchant PDP behind one exact-offer candidate's link, or null.
+ * A link that is already a merchant URL passes through; a Google
+ * redirect is followed to its destination (query-param extraction
+ * first, one network follow as a fallback). `product_link` is tried
+ * when `link` does not resolve. Every returned URL passed
+ * isMerchantUrl, so the exact-PDP-only rule still holds. The budget
+ * caps slow network follows (4s each) on a last-resort path.
+ */
+async function resolveCandidateLink(
+  link: string | null,
+  productLink: string | null,
+  budget: { remaining: number },
+): Promise<string | null> {
+  for (const raw of [link, productLink]) {
+    if (!raw) continue;
+    const absolute = absolutizeLink(raw);
+    if (!absolute) continue;
+    if (isMerchantUrl(absolute)) return sanitizeProductUrl(absolute);
+    if (budget.remaining <= 0) continue;
+    let u: URL;
+    try {
+      u = new URL(absolute);
+    } catch {
+      continue;
+    }
+    if (!u.hostname.toLowerCase().includes("google")) continue;
+    budget.remaining -= 1;
+    const dest = await resolveRedirectLink(absolute);
+    if (dest) return dest;
+  }
+  return null;
+}
+
+/**
  * Last-resort lookup for offers from providers that supply no usable
  * product token or ID (notably some Serper/Searlo results). The query is
  * constrained to the exact offer title and merchant, and a hit is only
- * accepted when BOTH the merchant and title match and `link` itself is
- * a validated direct product page. `product_link` is deliberately never
- * used because it is commonly a Google Shopping URL.
+ * accepted when BOTH the merchant and title match and the resolved
+ * link is a validated direct product page. SerpApi google_shopping
+ * links are usually Google redirects (/url?q=<PDP>, /aclk,
+ * /goto?url=...), not merchant URLs — the old isMerchantUrl gate on
+ * the raw link dropped every such candidate, so this path could never
+ * return a hit. The redirect is now resolved to its merchant
+ * destination first (param extraction, no network in the common
+ * case), then the merchant check applies to the destination.
+ * `product_link` is tried as a second source when `link` does not
+ * resolve; it is never trusted without the same gates.
  */
 async function viaSerpApiExactOfferSearch(
   title: string,
@@ -577,7 +652,7 @@ async function viaSerpApiExactOfferSearch(
   if (!key || !title.trim() || !store.trim()) return null;
   const params = new URLSearchParams({
     engine: "google_shopping",
-    q: `${title} ${store}`,
+    q: `${title} ${cleanStoreForQuery(store)}`,
     google_domain: "google.co.in",
     gl: cfg.region,
     hl: cfg.language,
@@ -585,20 +660,23 @@ async function viaSerpApiExactOfferSearch(
   });
   const outcome = await fetchJson(`https://serpapi.com/search.json?${params}`, {});
   if (!outcome.json || outcome.apiError) return null;
+  const budget = { remaining: MAX_REDIRECT_RESOLUTIONS };
   for (const item of asArray(outcome.json.shopping_results).slice(0, 20)) {
     const result = asRecord(item);
     if (!result) continue;
     const name = asString(result.source) ?? asString(result.seller) ?? asString(result.merchant);
     const candidateTitle = asString(result.title) ?? asString(result.name);
     const link = asString(result.link);
-    if (!name || !candidateTitle || !link) continue;
+    const productLink = asString(result.product_link);
+    if (!name || !candidateTitle || (!link && !productLink)) continue;
     if (!storesMatch(name, store) || !titleMatches(title, candidateTitle)) continue;
-    if (!isMerchantUrl(link)) continue;
+    const dest = await resolveCandidateLink(link, productLink, budget);
+    if (!dest) continue;
     const candPrice = asNumber(result.extracted_price) ?? asNumber(result.price);
     if (wantedPrice && candPrice && wantedPrice > 0) {
       if (candPrice > wantedPrice * 1.5 || candPrice < wantedPrice / 1.5) continue;
     }
-    return { name, link: sanitizeProductUrl(link), price: candPrice };
+    return { name, link: dest, price: candPrice };
   }
   return null;
 }
